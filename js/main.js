@@ -40,8 +40,9 @@ import {
 } from './core/formatNavigation.js';
 import {
   describeGeolocationError, describeNetworkStatus, describeRouteFetchFailure,
-  describeMapError, describeGpsAccuracyDegraded, describeRequestTimeout,
-  describeSearchNoResults, describeSearchFailure, describeWakeLockUnavailable
+  describeMapError, describeMapTemporaryError, describeGpsAccuracyDegraded, describeRequestTimeout,
+  describeSearchNoResults, describeSearchFailure, describeWakeLockUnavailable, describeWakeLockReleased,
+  describeVoiceSearchError
 } from './core/connectivityMessages.js';
 import { renderDebugPanel } from './ui/debugPanel.js';
 import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
@@ -49,6 +50,9 @@ import {
   recordDestinationUse, getHistory, toggleFavorite, isFavorite, getFavorites, excludeFavorites
 } from './log/destinationHistory.js';
 import { formatDestinationLabel, isDestinationSelectionValid } from './core/destinationSelection.js';
+import { isSearchResultStale } from './core/searchStaleness.js';
+import { shouldWarnOnWakeLockRelease } from './core/wakeLockPolicy.js';
+import { canClearAfterMinDisplay } from './core/bannerPriority.js';
 
 const dbg = {
   status: document.getElementById('dbgStatus'),
@@ -67,12 +71,12 @@ function setStatus(text, isError = false) {
 // 技術的な例外文はDEBUG欄だけに出し、利用者向けバナーには分かりやすい文言を出す。
 if (!MAPBOX_TOKEN || MAPBOX_TOKEN.startsWith('pk.ここに')) {
   setStatus('トークン未設定：js/config.js を編集してください', true);
-  setBannerState('map-error', '地図の設定が完了していません。設定内容を確認してください');
+  setBannerState('map-fatal', '地図の設定が完了していません。設定内容を確認してください');
   throw new Error('MAPBOX_TOKEN is not set');
 }
 if (MAPBOX_TOKEN.startsWith('sk.')) {
   setStatus('危険：sk.トークンは使用禁止です', true);
-  setBannerState('map-error', '地図の設定が完了していません。設定内容を確認してください');
+  setBannerState('map-fatal', '地図の設定が完了していません。設定内容を確認してください');
   throw new Error('secret token must not be used in a web app');
 }
 
@@ -257,7 +261,11 @@ function handleToggleFavorite(destination) {
 }
 
 // 検索ボタン・Enterキーどちらから呼ばれても同じ経路を通す（二重送信防止も一箇所で行う）。
+// latestSearchIdは「入力欄が今どの検索に対応しているか」の通し番号。新しい検索の開始・
+// 入力欄の書き換えのどちらでも進める。通信が後から返ってきた検索が、この番号と食い違う
+// （＝もう画面の入力欄と対応しない）場合は、結果を一切画面に反映しない（優先度A対応）。
 let searchInFlight = false;
+let latestSearchId = 0;
 
 async function performSearch() {
   const query = destInput.value.trim();
@@ -266,8 +274,10 @@ async function performSearch() {
     showHistoryOrFavoritesIfInputEmpty();
     return;
   }
-  if (searchInFlight) return; // 連打・Enter連打での二重送信を防ぐ
+  if (searchInFlight) return; // 連打・Enter連打での二重送信を防ぐ（APIを増やさない）
 
+  const searchId = ++latestSearchId;
+  const queryAtStart = query;
   searchInFlight = true;
   btnSearch.disabled = true;
   setBannerState('search-loading', '検索中…');
@@ -277,6 +287,8 @@ async function performSearch() {
       token: MAPBOX_TOKEN,
       proximity: lastPosition ? { lat: lastPosition.lat, lon: lastPosition.lon } : null
     });
+    if (isSearchResultStale({ searchId, latestSearchId, queryAtStart, currentInputValue: destInput.value })) return;
+
     if (results.length === 0) {
       setStatus('検索結果が見つかりません', true);
       hideDestResults();
@@ -287,13 +299,18 @@ async function performSearch() {
     setStatus(`候補${results.length}件から目的地を選んでください`);
     clearBannerState('search-failure');
   } catch (err) {
+    if (isSearchResultStale({ searchId, latestSearchId, queryAtStart, currentInputValue: destInput.value })) return;
     setStatus(`検索エラー: ${err.message}`, true);
     setBannerState('search-failure', err.isTimeout ? describeRequestTimeout() : describeSearchFailure());
   } finally {
-    // 検索の成否にかかわらず、ボタンは必ず再操作できる状態へ戻す。
-    btnSearch.disabled = false;
-    searchInFlight = false;
-    clearBannerState('search-loading');
+    // このsearchIdが依然として最新の場合だけ、ボタン・検索中表示・二重送信防止フラグを戻す。
+    // 入力欄の変更等で既に無効化された古い検索が後から終わっても、新しい検索の状態を壊さない
+    // （＝古い検索のfinallyが新しい検索のローディング状態を解除しない）。
+    if (searchId === latestSearchId) {
+      btnSearch.disabled = false;
+      searchInFlight = false;
+      clearBannerState('search-loading');
+    }
   }
 }
 
@@ -321,13 +338,18 @@ btnVoiceSearch.addEventListener('click', () => {
       btnVoiceSearch.classList.add('active');
       btnVoiceSearch.setAttribute('aria-pressed', 'true');
       setStatus('音声を聞いています…');
+      clearBannerState('voice-search-failure'); // 新しく試すので古い失敗表示は消す
     },
     onResult: (text) => {
       destInput.value = text;
       setStatus(`音声認識: ${text}`);
+      clearBannerState('voice-search-failure');
       btnSearch.click();
     },
-    onError: (message) => setStatus(message, true),
+    onError: (reasonCode, debugMessage) => {
+      setStatus(debugMessage, true);
+      setBannerState('voice-search-failure', describeVoiceSearchError(reasonCode));
+    },
     onEnd: () => {
       btnVoiceSearch.classList.remove('active');
       btnVoiceSearch.setAttribute('aria-pressed', 'false');
@@ -351,8 +373,18 @@ function showHistoryOrFavoritesIfInputEmpty() {
 // destInput.value を書き換えてもinputイベントは発火しないため、ここでは常に
 // 「利用者が実際に編集した」場合だけを扱える）。
 destInput.addEventListener('input', () => {
+  if (searchInFlight) {
+    // 検索中に入力が変わったら、その検索はもう今の入力欄と対応しないため無効化する。
+    // 実際の通信は裏側でそのまま完了させてよい（結果はisSearchResultStaleで破棄される）が、
+    // 「検索中…」表示とボタンの無効化はここで即座に元へ戻す（古い検索の完了を待たせない）。
+    latestSearchId++;
+    searchInFlight = false;
+    btnSearch.disabled = false;
+    clearBannerState('search-loading');
+  }
   clearSelectedDestinationIfMismatched();
   clearBannerState('search-failure'); // 新しく入力し直したので古い検索失敗表示は消す
+  clearBannerState('voice-search-failure');
   hideDestResults();
   showHistoryOrFavoritesIfInputEmpty();
 });
@@ -623,8 +655,17 @@ function onPositionError(err) {
 }
 
 // ---------- 地図の読み込み完了後に開始 ----------
+// 初期読み込みが完了したかどうかで、errorイベントを「致命的」と「一時的」に分ける。
+// Mapbox GL JSの'error'イベント自体には致命的/一時的の区別が無く（公式ソースのJSDocにも
+// 記載無し。v3.28.1で確認済み）、初回読み込み前後という自前の基準で判定する。
+let mapLoaded = false;
+// 一時的な地図エラーが短時間に連発しても、バナーが点滅しないよう最低表示時間を設ける。
+let mapTemporaryErrorSetAt = null;
+const MAP_TEMPORARY_ERROR_MIN_DISPLAY_MS = 2000;
+
 map.on('load', () => {
   setStatus('地図OK（Step 1完了）');
+  mapLoaded = true;
   enableTerrain(map);
   applyLightPreset(map, pickLightPreset());
 
@@ -634,7 +675,24 @@ map.on('load', () => {
 map.on('error', (e) => {
   // 技術的な例外文はDEBUG欄だけに出し、利用者向けの案内バナーには出さない。
   setStatus('地図エラー：' + (e.error?.message ?? '不明'), true);
-  setBannerState('map-error', describeMapError());
+  if (!mapLoaded) {
+    // 初期読み込み完了前のエラー（トークン不正・style読み込み失敗等）は致命的として扱う。
+    setBannerState('map-fatal', describeMapError());
+  } else {
+    // 初期読み込み後のエラーは一時的な通信不良（タイル取得失敗等）の可能性が高いため、
+    // 致命的エラーより優先度を下げる。回復判定はmap.on('idle', ...)で行う。
+    setBannerState('map-temporary', describeMapTemporaryError());
+    mapTemporaryErrorSetAt = Date.now();
+  }
+});
+
+// 'idle'は「カメラ移動中でなく、要求済みのタイルがすべて読み込み完了し、フェード/遷移
+// アニメーションも終わった」ときに発火する（Mapbox GL JS公式ソースのJSDocより、v3.28.1で確認済み）。
+// 一時的な地図エラーからの回復判定として使う。
+map.on('idle', () => {
+  if (!canClearAfterMinDisplay(mapTemporaryErrorSetAt, Date.now(), MAP_TEMPORARY_ERROR_MIN_DISPLAY_MS)) return;
+  clearBannerState('map-temporary');
+  mapTemporaryErrorSetAt = null;
 });
 
 window.addEventListener('beforeunload', () => {
@@ -666,12 +724,22 @@ window.addEventListener('online', updateConnectivityBanner);
 window.addEventListener('offline', updateConnectivityBanner);
 updateConnectivityBanner();
 
+// resetNavState()が意図的にWake Lockを解放する直前にtrueにするフラグ。
+// これが立っていないままreleaseイベントが来た場合は、OS側の都合（画面ロック・
+// 省電力モード等）による予期しない解除とみなし、ナビ中であれば警告を出す。
+let manualWakeLockRelease = false;
+
 async function acquireWakeLock() {
   const result = await requestWakeLock();
   if (result.ok) {
     wakeLockSentinel = result.sentinel;
     wakeLockSentinel.addEventListener('release', () => {
+      const wasManual = manualWakeLockRelease;
       wakeLockSentinel = null;
+      manualWakeLockRelease = false;
+      if (shouldWarnOnWakeLockRelease({ wasManual, navActive })) {
+        setBannerState('wake-lock', describeWakeLockReleased());
+      }
     });
     clearBannerState('wake-lock');
   } else {
@@ -786,6 +854,7 @@ function resetNavState({ cancelVoice = true } = {}) {
   clearBannerState('nav-guard');
 
   if (wakeLockSentinel) {
+    manualWakeLockRelease = true; // これから解放するのは意図的な操作なので警告しない
     wakeLockSentinel.release();
     wakeLockSentinel = null;
   }

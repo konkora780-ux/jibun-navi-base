@@ -17,13 +17,17 @@ export function isSpeechInputSupported() {
 }
 
 /**
- * @param {{onResult:(text:string)=>void, onError:(message:string)=>void, onStart?:()=>void, onEnd?:()=>void}} handlers
+ * @param {{onResult:(text:string)=>void, onError:(reasonCode:string, debugMessage:string)=>void, onStart?:()=>void, onEnd?:()=>void}} handlers
+ *   onErrorの第1引数(reasonCode)は 'unsupported' または SpeechRecognitionErrorEvent.error 相当の
+ *   コード（例：'not-allowed' 'no-speech' 'network'）。利用者向け文言への変換は
+ *   core/connectivityMessages.js の describeVoiceSearchError() が行う（ここでは技術的な
+ *   コードのまま渡すだけにする）。第2引数はDEBUG表示用の技術的な文字列。
  * @returns {boolean} 開始できたか
  */
 export function startVoiceSearch({ onResult, onError, onStart, onEnd }) {
   const Ctor = getSpeechRecognitionCtor();
   if (!Ctor) {
-    onError('この端末・ブラウザは音声検索に対応していません');
+    onError('unsupported', 'この端末・ブラウザは音声検索に対応していません');
     return false;
   }
 
@@ -38,7 +42,7 @@ export function startVoiceSearch({ onResult, onError, onStart, onEnd }) {
     onResult(text);
   };
   recognition.onerror = (event) => {
-    onError(`音声認識エラー: ${event.error}`);
+    onError(event.error, `音声認識エラー: ${event.error}`);
   };
   recognition.onend = () => onEnd?.();
 
@@ -46,7 +50,7 @@ export function startVoiceSearch({ onResult, onError, onStart, onEnd }) {
     recognition.start();
     return true;
   } catch (err) {
-    onError(`音声認識を開始できません: ${err.message}`);
+    onError('start-failed', `音声認識を開始できません: ${err.message}`);
     return false;
   }
 }

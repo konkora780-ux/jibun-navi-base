@@ -61,14 +61,19 @@ import { renderSmartLaneGuide } from '../js/ui/smartLaneGuide.js';
 import { pickTargetRoad } from '../js/core/models.js';
 import { resolveUpcomingRoadName, formatUpcomingRoadLabel } from '../js/core/formatNavigation.js';
 import {
-  describeMapError, describeGpsAccuracyDegraded, describeRequestTimeout,
-  describeSearchNoResults, describeSearchFailure, describeWakeLockUnavailable
+  describeMapError, describeMapTemporaryError, describeGpsAccuracyDegraded, describeRequestTimeout,
+  describeSearchNoResults, describeSearchFailure, describeWakeLockUnavailable, describeWakeLockReleased,
+  describeVoiceSearchError
 } from '../js/core/connectivityMessages.js';
 import { mergeIntoHistory, toggleInFavorites, excludeFavorites } from '../js/log/destinationHistory.js';
 import { formatDestinationLabel, isDestinationSelectionValid } from '../js/core/destinationSelection.js';
-import { pickHighestPriorityMessage, BANNER_PRIORITY_ORDER } from '../js/core/bannerPriority.js';
+import {
+  pickHighestPriorityMessage, BANNER_PRIORITY_ORDER, isKnownBannerReason, canClearAfterMinDisplay
+} from '../js/core/bannerPriority.js';
 import { setBannerState, clearBannerState, resetBannerStates, getActiveBannerStates } from '../js/ui/statusBannerController.js';
 import { fetchWithTimeout } from '../js/platform/fetchWithTimeout.js';
+import { isSearchResultStale } from '../js/core/searchStaleness.js';
+import { shouldWarnOnWakeLockRelease } from '../js/core/wakeLockPolicy.js';
 
 const cases = [];
 function test(description, fn) {
@@ -1044,14 +1049,14 @@ test('お気に入りから選んだ場合も入力欄と選択が一致し、�
 
 // ---------- 優先度A-2: 案内バナーの状態を一元管理する ----------
 test('pickHighestPriorityMessage: 複数の状態があるとき優先順位の先頭のものを返す', () => {
-  const states = new Map([['gps-accuracy', 'GPS精度低下'], ['map-error', '地図エラー'], ['offline', 'オフライン']]);
-  assertEqual(pickHighestPriorityMessage(states), '地図エラー', 'map-errorが最優先');
+  const states = new Map([['gps-accuracy', 'GPS精度低下'], ['map-fatal', '地図エラー'], ['offline', 'オフライン']]);
+  assertEqual(pickHighestPriorityMessage(states), '地図エラー', 'map-fatalが最優先');
 });
 test('pickHighestPriorityMessage: 該当する状態が無ければnullを返す', () => {
   assertEqual(pickHighestPriorityMessage(new Map()), null, 'null');
 });
-test('BANNER_PRIORITY_ORDER: map-errorが最優先、route-loadingが最も低い', () => {
-  assertEqual(BANNER_PRIORITY_ORDER[0], 'map-error', '先頭');
+test('BANNER_PRIORITY_ORDER: map-fatalが最優先、search-loadingが最も低い', () => {
+  assertEqual(BANNER_PRIORITY_ORDER[0], 'map-fatal', '先頭');
   assertEqual(BANNER_PRIORITY_ORDER[BANNER_PRIORITY_ORDER.length - 1], 'search-loading', '末尾');
 });
 
@@ -1064,7 +1069,7 @@ function bannerHidden() {
 
 test('statusBannerController: 地図エラー中に正常なGPS状態（gps-accuracy解除）が来ても地図エラーは消えない', () => {
   resetBannerStates();
-  setBannerState('map-error', '地図の読み込みでエラーが発生しました');
+  setBannerState('map-fatal', '地図の読み込みでエラーが発生しました');
   clearBannerState('gps-accuracy'); // 正常なGPS更新に相当（何もsetしない/念のためclearする）
   assertEqual(bannerText(), '地図の読み込みでエラーが発生しました', '地図エラーが表示され続ける');
 });
@@ -1100,9 +1105,9 @@ test('statusBannerController: 複数警告がある場合は最も優先度の�
   resetBannerStates();
   setBannerState('gps-accuracy', 'A: GPS精度低下');
   setBannerState('offline', 'B: オフライン');
-  setBannerState('map-error', 'C: 地図エラー');
-  assertEqual(bannerText(), 'C: 地図エラー', '最優先のmap-errorが表示される');
-  clearBannerState('map-error');
+  setBannerState('map-fatal', 'C: 地図エラー');
+  assertEqual(bannerText(), 'C: 地図エラー', '最優先のmap-fatalが表示される');
+  clearBannerState('map-fatal');
   assertEqual(bannerText(), 'B: オフライン', '次に優先度の高いofflineが表示される');
   clearBannerState('offline');
   assertEqual(bannerText(), 'A: GPS精度低下', '最後に残ったgps-accuracyが表示される');
@@ -1215,6 +1220,158 @@ test('BANNER_PRIORITY_ORDER: search-failureはroute-fetch-failureより低く、
   const idxNavGuard = BANNER_PRIORITY_ORDER.indexOf('nav-guard');
   assertEqual(idxRouteFail < idxSearchFail, true, 'route-fetch-failureの方が優先度が高い');
   assertEqual(idxSearchFail < idxNavGuard, true, 'search-failureの方がnav-guardより優先度が高い');
+});
+
+// ==================== 追加レビュー対応（優先度A/B/C） ====================
+
+// ---------- 優先度A: 古い検索結果の表示を防ぐ ----------
+test('isSearchResultStale: searchIdが最新と一致し、入力欄も検索時のままなら古くない', () => {
+  const stale = isSearchResultStale({ searchId: 1, latestSearchId: 1, queryAtStart: '釜石駅', currentInputValue: '釜石駅' });
+  assertEqual(stale, false, '古くない＝結果を表示してよい');
+});
+test('isSearchResultStale: searchIdが最新でなければ古い（別の検索や入力変更で無効化された）', () => {
+  const stale = isSearchResultStale({ searchId: 1, latestSearchId: 2, queryAtStart: '釜石駅', currentInputValue: '釜石駅' });
+  assertEqual(stale, true, '古い');
+});
+test('isSearchResultStale: searchIdが一致していても、入力欄が検索時と違えば古い', () => {
+  const stale = isSearchResultStale({ searchId: 1, latestSearchId: 1, queryAtStart: '釜石駅', currentInputValue: '遠野駅' });
+  assertEqual(stale, true, '入力が変わっているので古い扱い（検索中に入力を変更すると古い結果を表示しない）');
+});
+test('isSearchResultStale: 入力欄の前後の空白は無視して比較する', () => {
+  const stale = isSearchResultStale({ searchId: 1, latestSearchId: 1, queryAtStart: '釜石駅', currentInputValue: '  釜石駅  ' });
+  assertEqual(stale, false, 'trimして比較するので古くない扱い');
+});
+
+// ---------- 優先度A: 地図エラーを致命的/一時的に分ける ----------
+test('describeMapError: 致命的エラー用の日本語案内を返す', () => {
+  const msg = describeMapError();
+  assertEqual(typeof msg === 'string' && msg.length > 0, true, '文字列を返す');
+  assertEqual(/[a-zA-Z]{4,}/.test(msg), false, '技術的な英字列を含まない');
+});
+test('describeMapTemporaryError: 一時的エラー用の控えめな日本語案内を返し、致命的エラーとは異なる文言にする', () => {
+  const msg = describeMapTemporaryError();
+  assertEqual(typeof msg === 'string' && msg.length > 0, true, '文字列を返す');
+  assertEqual(msg !== describeMapError(), true, '致命的エラーの文言とは別');
+  assertEqual(/[a-zA-Z]{4,}/.test(msg), false, '技術的な英字列を含まない');
+});
+test('BANNER_PRIORITY_ORDER: map-fatalが最優先で、map-temporaryはoffline/gps-errorより低い', () => {
+  assertEqual(BANNER_PRIORITY_ORDER[0], 'map-fatal', 'map-fatalが先頭（最優先）');
+  const idxTemp = BANNER_PRIORITY_ORDER.indexOf('map-temporary');
+  const idxOffline = BANNER_PRIORITY_ORDER.indexOf('offline');
+  const idxGpsError = BANNER_PRIORITY_ORDER.indexOf('gps-error');
+  assertEqual(idxOffline < idxTemp, true, 'offlineの方がmap-temporaryより優先度が高い');
+  assertEqual(idxGpsError < idxTemp, true, 'gps-errorの方がmap-temporaryより優先度が高い');
+});
+test('canClearAfterMinDisplay: 最低表示時間を経過していなければ消してはいけない', () => {
+  assertEqual(canClearAfterMinDisplay(1000, 1500, 2000), false, '500ms経過のみ→まだ消せない');
+});
+test('canClearAfterMinDisplay: 最低表示時間を経過していれば消してよい', () => {
+  assertEqual(canClearAfterMinDisplay(1000, 3500, 2000), true, '2500ms経過→消してよい');
+});
+test('canClearAfterMinDisplay: 境界値ちょうどでは消してよい', () => {
+  assertEqual(canClearAfterMinDisplay(1000, 3000, 2000), true, 'ちょうど2000ms経過');
+});
+test('canClearAfterMinDisplay: setAtがnull（表示していない）ならfalse', () => {
+  assertEqual(canClearAfterMinDisplay(null, 3000, 2000), false, '表示していないので消す対象がない');
+});
+test('statusBannerController: 致命的な地図エラー中に通常のGPS更新（gps-accuracy解除）が来ても消えない', () => {
+  resetBannerStates();
+  setBannerState('map-fatal', '地図の設定が完了していません');
+  clearBannerState('gps-accuracy');
+  assertEqual(document.getElementById('navStatusBanner').textContent, '地図の設定が完了していません', '致命的エラーは残る');
+});
+test('statusBannerController: 一時的な地図エラーは回復状態（明示的なclearBannerState）で解除される', () => {
+  resetBannerStates();
+  setBannerState('map-temporary', '地図の通信が一時的に不安定です');
+  clearBannerState('map-temporary');
+  assertEqual(document.getElementById('navStatusBanner').classList.contains('hidden'), true, '解除される');
+});
+test('statusBannerController: 一時的な地図エラー解除後は、次に優先度の高い警告が表示される', () => {
+  resetBannerStates();
+  setBannerState('offline', 'オフラインです');
+  setBannerState('map-temporary', '地図の通信が一時的に不安定です');
+  assertEqual(document.getElementById('navStatusBanner').textContent, 'オフラインです', 'offlineの方が優先度が高いので最初からofflineが表示される');
+  clearBannerState('map-temporary');
+  assertEqual(document.getElementById('navStatusBanner').textContent, 'オフラインです', '解除後もofflineが表示され続ける');
+});
+test('statusBannerController: トークン未設定相当のmap-fatalは、明示的にclearするまで自動解除されない', () => {
+  resetBannerStates();
+  setBannerState('map-fatal', '地図の設定が完了していません。設定内容を確認してください');
+  clearBannerState('gps-accuracy');
+  clearBannerState('offline');
+  clearBannerState('wake-lock');
+  assertEqual(document.getElementById('navStatusBanner').textContent, '地図の設定が完了していません。設定内容を確認してください', '他の状態の変化では消えない');
+  resetBannerStates();
+});
+
+// ---------- 優先度B: Wake Lockの途中解除を検知する ----------
+test('shouldWarnOnWakeLockRelease: ナビ中の予期しないreleaseでは警告する', () => {
+  assertEqual(shouldWarnOnWakeLockRelease({ wasManual: false, navActive: true }), true, '警告する');
+});
+test('shouldWarnOnWakeLockRelease: 手動終了時のreleaseでは警告しない', () => {
+  assertEqual(shouldWarnOnWakeLockRelease({ wasManual: true, navActive: true }), false, '警告しない');
+});
+test('shouldWarnOnWakeLockRelease: ナビ終了後（navActive:false）のreleaseでは警告しない', () => {
+  assertEqual(shouldWarnOnWakeLockRelease({ wasManual: false, navActive: false }), false, '警告しない＝再取得もしない対象');
+});
+test('describeWakeLockReleased: 対応方法が分かる日本語文言を返す', () => {
+  assertEqual(describeWakeLockReleased(), '画面消灯防止が解除されました。端末の自動ロック設定を確認してください', '文言');
+});
+
+// ---------- 優先度B: 音声検索エラーを利用者向けに表示する ----------
+test('describeVoiceSearchError: マイク許可拒否(not-allowed/service-not-allowed)は許可を確認する案内になる', () => {
+  assertEqual(describeVoiceSearchError('not-allowed'), 'マイクの利用が許可されていません。端末の設定を確認してください', 'not-allowed');
+  assertEqual(describeVoiceSearchError('service-not-allowed'), 'マイクの利用が許可されていません。端末の設定を確認してください', 'service-not-allowed');
+});
+test('describeVoiceSearchError: no-speechは「認識できなかった」案内になる', () => {
+  assertEqual(describeVoiceSearchError('no-speech'), '音声を認識できませんでした。もう一度お試しください', 'no-speech');
+});
+test('describeVoiceSearchError: unsupportedは「この端末では使えない」案内になり、文字検索を促す', () => {
+  const msg = describeVoiceSearchError('unsupported');
+  assertEqual(msg.includes('文字'), true, '文字検索を促す文言を含む');
+});
+test('describeVoiceSearchError: 未知のエラーコードでも技術的なコードをそのまま出さず、汎用的な案内になる', () => {
+  const msg = describeVoiceSearchError('network');
+  assertEqual(msg.includes('network'), false, '技術的なコードをそのまま含まない');
+  assertEqual(typeof msg === 'string' && msg.length > 0, true, '何らかの案内文を返す');
+});
+
+// ---------- 優先度C: バナー状態名の入力ミスを検出する ----------
+test('isKnownBannerReason: BANNER_PRIORITY_ORDERにあるreasonはtrue', () => {
+  assertEqual(isKnownBannerReason('map-fatal'), true, '既知');
+  assertEqual(isKnownBannerReason('gps-accuracy'), true, '既知');
+});
+test('isKnownBannerReason: 存在しないreasonはfalse', () => {
+  assertEqual(isKnownBannerReason('map-eror'), false, 'タイプミスは未知扱い');
+});
+test('setBannerState: 未知のreasonを渡すとconsole.warnが呼ばれるが、例外は投げず画面も壊さない', () => {
+  const originalWarn = console.warn;
+  let warned = false;
+  console.warn = () => { warned = true; };
+  try {
+    resetBannerStates();
+    setBannerState('typo-reason-xyz', 'テスト');
+    assertEqual(warned, true, 'console.warnが呼ばれる');
+    // BANNER_PRIORITY_ORDERに無いため、画面には反映されない（静かに無視されるのではなく、警告はするが表示はしない）
+    assertEqual(document.getElementById('navStatusBanner').classList.contains('hidden'), true, '画面は壊れず非表示のまま');
+  } finally {
+    console.warn = originalWarn;
+    resetBannerStates();
+  }
+});
+test('setBannerState: 既知のreasonでは警告が呼ばれず、これまでどおり正常に動作する', () => {
+  const originalWarn = console.warn;
+  let warned = false;
+  console.warn = () => { warned = true; };
+  try {
+    resetBannerStates();
+    setBannerState('gps-accuracy', 'GPS精度が低下しています');
+    assertEqual(warned, false, '既知のreasonでは警告なし');
+    assertEqual(document.getElementById('navStatusBanner').textContent, 'GPS精度が低下しています', '正常に表示される');
+  } finally {
+    console.warn = originalWarn;
+    resetBannerStates();
+  }
 });
 
 // ---------- 実行 ----------

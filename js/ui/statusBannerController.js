@@ -8,7 +8,7 @@
  * メッセージだけを表示する（優先順位はcore/bannerPriority.jsを参照）。
  */
 import { showStatusBanner, hideStatusBanner } from './navigationPanel.js';
-import { pickHighestPriorityMessage } from '../core/bannerPriority.js';
+import { pickHighestPriorityMessage, isKnownBannerReason } from '../core/bannerPriority.js';
 
 const activeStates = new Map();
 
@@ -26,6 +26,12 @@ function render() {
  * @param {string} message
  */
 export function setBannerState(reason, message) {
+  // BANNER_PRIORITY_ORDERに無いreasonはMapには記録されるが表示に一切反映されず、
+  // 呼び出し側のタイプミスに気付けないまま放置されやすい。例外は投げず（本番画面を
+  // 壊さないため）、開発中に気付けるようconsole.warnだけ出す。
+  if (!isKnownBannerReason(reason)) {
+    console.warn(`statusBannerController: 未知のバナー状態reasonです（BANNER_PRIORITY_ORDERに追加を忘れていませんか）: ${reason}`);
+  }
   activeStates.set(reason, message);
   render();
 }

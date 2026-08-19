@@ -41,12 +41,22 @@ export function describeRouteFetchFailure(retryStatus) {
 }
 
 /**
- * 地図の読み込み・通信エラー用。技術的な例外文（e.error.message等）はそのまま
- * 利用者に見せず、この文言に置き換える（詳細はDEBUGパネル側にだけ出す）。
+ * 地図の初期読み込みが失敗した場合（致命的）の案内。技術的な例外文（e.error.message等）は
+ * そのまま利用者に見せず、この文言に置き換える（詳細はDEBUGパネル側にだけ出す）。
+ * map.on('load')が一度も発火する前のerrorイベントに使う。
  * @returns {string}
  */
 export function describeMapError() {
   return '地図の読み込みでエラーが発生しました。しばらくしてから再度お試しください';
+}
+
+/**
+ * 地図の初期読み込み完了後に発生した一時的な通信エラー（タイル取得失敗等）の案内。
+ * 地図自体は動作を続けている可能性が高いため、致命的エラーとは別の控えめな文言にする。
+ * @returns {string}
+ */
+export function describeMapTemporaryError() {
+  return '地図の通信が一時的に不安定です。しばらくお待ちください';
 }
 
 /**
@@ -88,4 +98,33 @@ export function describeSearchFailure() {
  */
 export function describeWakeLockUnavailable() {
   return '画面消灯防止を使用できません。走行前に端末の自動ロック設定を確認してください';
+}
+
+/**
+ * ナビ中にWake LockがOS側の都合（画面ロック・省電力モード等）で予期せず解除されたときの案内。
+ * 手動でのナビ終了によるreleaseでは使わない（呼び出し側で区別すること）。
+ * @returns {string}
+ */
+export function describeWakeLockReleased() {
+  return '画面消灯防止が解除されました。端末の自動ロック設定を確認してください';
+}
+
+/**
+ * 音声検索（Web Speech API）のエラーコードを利用者向けの日本語案内に変換する。
+ * 技術的なエラーコードをそのまま表示しない。
+ * @param {string} reasonCode 'unsupported' | SpeechRecognitionErrorEvent.error 相当の文字列
+ * @returns {string}
+ */
+export function describeVoiceSearchError(reasonCode) {
+  switch (reasonCode) {
+    case 'not-allowed':
+    case 'service-not-allowed':
+      return 'マイクの利用が許可されていません。端末の設定を確認してください';
+    case 'no-speech':
+      return '音声を認識できませんでした。もう一度お試しください';
+    case 'unsupported':
+      return 'この端末では音声検索を利用できません。文字で検索してください';
+    default:
+      return '音声検索でエラーが発生しました。文字で検索してください';
+  }
 }
