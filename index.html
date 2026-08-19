@@ -80,10 +80,23 @@
     </div>
   </aside>
 
-  <!-- 下部の案内バー（浮かせる） -->
+  <!-- 実走用ナビ案内パネル（浮かせる）。DEBUGパネルとは完全に別。 -->
   <footer id="guidebar">
-    <span id="guideMain">ナビ未開始</span>
-    <span id="guideLane"></span>
+    <div id="navStatusBanner" class="hidden" role="status"></div>
+    <div id="navMainRow">
+      <div id="navIcon" class="nav-icon"></div>
+      <div id="navInfo">
+        <div id="navDistance" class="nav-distance"></div>
+        <div id="navRoadName" class="nav-road-name">ナビ未開始</div>
+        <div id="navSmartLaneText" class="nav-smartlane-text"></div>
+      </div>
+    </div>
+    <div id="navLanes" class="nav-lanes"></div>
+    <div id="navSummaryRow">
+      <span id="navEta">—</span>
+      <span id="navRemainingTime"></span>
+      <span id="navRemainingDistance"></span>
+    </div>
   </footer>
 
 </div>

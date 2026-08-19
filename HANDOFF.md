@@ -23,10 +23,12 @@
 | ✅ 完了 | 技術調査（Mapbox・料金・車線データの取得方法） |
 | ✅ 完了 | 開発方式の決定（Webアプリ／費用¥0） |
 | ✅ 完了 | 仕様書3点の作成 |
-| ✅ 完了 | **Step 1：土台の作成**（index.html / config.js / main.js / style.css） |
-| ⬜ 次 | **Step 2：現在地追従とGPS精度表示** |
+| ✅ 完了 | **Phase 1（Step 1〜11）実装**：地図・GPS追従・画面消灯防止/音声解禁・SmartLane本体（自動テスト20件通過）・目的地検索・自動再ルート・走行ログ・集計画面 |
+| ✅ 完了 | **Phase 2（初期）**：全画面フローティングUI・設定画面（`settings.html`）・音声検索・目的地マーカー |
+| ✅ 完了 | **Phase 2A**：他社カーナビ(COCCHi等)を参考にした実走用ナビパネル・到着判定・標準音声案内・SmartLane専用表示・通信/GPS状態表示（自動テスト追加、`appLogic.test.html`が79件通過） |
+| ⬜ 次 | **実車での走行確認**（`docs/05_Phase2A実走確認チェックリスト.md`）。その後、Phase 2B以降（`docs/04_COCCHi比較・今後の改善計画.md`、設計のみ・未実装） |
 
-Step 1 のコードは構文チェック済みですが、**まだ実機で地図を表示できていません**（トークン未設定のため）。
+Phase 1〜2Aのコードは自動テスト（`tests/smartLane.test.html` 20件、`tests/appLogic.test.html` 79件）をすべて通過済みです。**ただし実車での走行確認はまだ行っていません。**
 
 ---
 
@@ -195,8 +197,14 @@ jibun-navi-base/
 ├─ docs/
 │   ├─ 00_調査報告.md          技術調査の結果と制約
 │   ├─ 01_SmartLane仕様.md     中核ロジックの仕様（安全原則・テスト20件）
-│   └─ 02_Phase1実装計画.md    Step 1〜11の手順と判定方法
+│   ├─ 02_Phase1実装計画.md    Step 1〜11の手順と判定方法
+│   ├─ 03_VOICEVOXナビ音声仕様（将来フェーズ）.md
+│   ├─ 04_COCCHi比較・今後の改善計画.md   他社比較とPhase2B以降の設計（未実装）
+│   └─ 05_Phase2A実走確認チェックリスト.md  同乗者向け実走確認チェックリスト
 ├─ index.html
+├─ settings.html       ← 設定画面
+├─ stats.html          ← 走行ログ集計画面
+├─ manifest.json
 ├─ css/style.css
 ├─ js/
 │   ├─ config.js       ★トークンとしきい値。まずここを編集
@@ -206,7 +214,7 @@ jibun-navi-base/
 │   ├─ nav/            ナビ進行の自前実装
 │   ├─ ui/
 │   └─ log/
-└─ tests/fixtures/     SmartLaneのテストケースJSON
+└─ tests/               smartLane.test.html（20件）／appLogic.test.html（79件）
 ```
 
 ---

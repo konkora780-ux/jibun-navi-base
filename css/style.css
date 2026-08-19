@@ -104,7 +104,9 @@ html, body {
 #debugPanel {
   top: calc(env(safe-area-inset-top) + 66px);
   right: calc(env(safe-area-inset-right) + 10px);
-  bottom: calc(env(safe-area-inset-bottom) + 68px);
+  /* 実走用ナビパネル(#guidebar)の高さは表示内容（SmartLane文言・車線表示の有無）で伸縮する。
+     案内中（SmartLane表示あり）の実測高さ約200pxに余裕を持たせて重ならないようにする。 */
+  bottom: calc(env(safe-area-inset-bottom) + 230px);
   z-index: 20;
   width: min(260px, calc(100vw - 20px));
   overflow-y: auto;
@@ -156,18 +158,92 @@ html, body {
 .lane-recommended { background: #1f6feb; color: #fff; font-weight: 700; }
 .lane-missing { color: #f85149; }
 
-/* ---------- 下部の案内バー ---------- */
+/* ---------- 実走用ナビ案内パネル（下部・DEBUGパネルとは別） ---------- */
+/* 「重要情報を大きく・小さな文字を増やしすぎない・明暗どちらの地図でも読める」を優先する。
+   背景は他のフローティングパネルと同じ半透明だが、文字色は白系で固定しコントラストを確保する。 */
 #guidebar {
   left: calc(env(safe-area-inset-left) + 10px);
   right: calc(env(safe-area-inset-right) + 10px);
   bottom: calc(env(safe-area-inset-bottom) + 10px);
-  padding: 10px 14px;
-  display: flex;
-  gap: 14px;
-  align-items: baseline;
+  padding: 12px 16px;
+  color: #ffffff;
 }
-#guideMain { font-size: 22px; font-weight: 700; }
-#guideLane { font-size: 18px; color: #58a6ff; }
+
+#navStatusBanner {
+  background: #b34700;
+  color: #fff;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+#navMainRow {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.nav-icon {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  color: #ffffff;
+}
+
+#navInfo {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.nav-distance {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.nav-road-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #e6edf3;
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* SmartLane文言はConfidenceごとに色分けするが、色だけに頼らず太字・記号でも判別できるようにする */
+.nav-smartlane-text {
+  font-size: 15px;
+  margin-top: 4px;
+}
+.nav-smartlane-text:not(:empty)::before { content: '車線: '; opacity: .75; }
+.nav-smartlane-text.conf-high { color: #3fb950; font-weight: 700; }
+.nav-smartlane-text.conf-medium { color: #d29922; font-weight: 600; }
+.nav-smartlane-text.conf-low { color: #8b949e; font-style: italic; }
+.nav-smartlane-text.conf-unknown { color: #6e7681; font-size: 13px; }
+
+.nav-lanes:not(:empty) { margin-top: 8px; }
+.nav-lanes .lane {
+  font-size: 16px;
+  min-width: 30px;
+  padding: 6px 8px;
+  margin: 2px;
+}
+.nav-lanes .lane-recommended { border: 2px solid #fff; }
+
+#navSummaryRow {
+  display: flex;
+  gap: 16px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(230, 237, 243, 0.2);
+  font-size: 15px;
+  font-weight: 600;
+  color: #e6edf3;
+  flex-wrap: wrap;
+}
 
 /* ---------- 現在地マーカー ---------- */
 .user-marker {

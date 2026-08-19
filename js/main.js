@@ -9,25 +9,35 @@
  * Step 10：走行ログ
  */
 import {
-  MAPBOX_TOKEN, MAP_STYLE, MAP_DEFAULT, MAP_FOLLOW, GPS_ACCURACY, LOG
+  MAPBOX_TOKEN, MAP_STYLE, MAP_DEFAULT, MAP_FOLLOW, GPS_ACCURACY, LOG, ARRIVAL, API_RETRY
 } from './config.js';
 import {
   createMap, enableTerrain, pickLightPreset, applyLightPreset,
   createUserMarker, createDestinationMarker, followCamera, drawRoute, clearRoute
 } from './platform/mapView.js';
 import { watchPosition, clearWatch, requestWakeLock } from './platform/location.js';
-import { unlockSpeech, speak } from './platform/voice.js';
+import { unlockSpeech, speak, cancelSpeech } from './platform/voice.js';
 import { fetchRoute } from './platform/directions.js';
 import { searchDestination } from './platform/geocoding.js';
 import { isSpeechInputSupported, startVoiceSearch } from './platform/speechInput.js';
 import { createRouteTracker } from './nav/routeTracker.js';
 import { createRerouter } from './nav/rerouter.js';
 import { createNavSession } from './nav/navSession.js';
+import { createNavigationProgress } from './nav/navigationProgress.js';
+import { createArrivalTracker } from './nav/arrivalTracker.js';
+import { createVoiceScheduler } from './nav/voiceScheduler.js';
+import { createApiRetryPolicy } from './nav/apiRetryPolicy.js';
 import { renderDestResultItem } from './ui/destResultsView.js';
+import { renderNavigationPanel, showStatusBanner, hideStatusBanner } from './ui/navigationPanel.js';
+import { renderSmartLaneGuide } from './ui/smartLaneGuide.js';
 import { createSmartLaneInput } from './core/models.js';
 import { evaluateSmartLane } from './core/smartLane.js';
 import { compareRecommendation } from './core/compare.js';
 import { describeManeuver } from './core/phrase.js';
+import { formatDistance, formatDuration, formatETA } from './core/formatNavigation.js';
+import {
+  describeGeolocationError, describeNetworkStatus, describeRouteFetchFailure
+} from './core/connectivityMessages.js';
 import { renderDebugPanel } from './ui/debugPanel.js';
 import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
 
@@ -237,10 +247,14 @@ document.addEventListener('click', (e) => {
   }
 });
 
-// ---------- ナビ本体（Step6〜10：ルート取得・追跡・SmartLane評価・ログ） ----------
+// ---------- ナビ本体（Step6〜10 + Phase2A：ルート取得・追跡・SmartLane評価・ログ） ----------
 let currentRoute = null;
 let tracker = null;
 const rerouter = createRerouter();
+const navigationProgress = createNavigationProgress();
+const arrivalTracker = createArrivalTracker(ARRIVAL);
+const voiceScheduler = createVoiceScheduler();
+const rerouteRetryPolicy = createApiRetryPolicy(API_RETRY);
 let lastLogAt = 0;
 let lastLoggedStepIndex = -1;
 let rerouting = false;
@@ -314,6 +328,65 @@ function processNavUpdate(pos) {
   };
   renderDebugPanel(snap);
 
+  // ---------- 到着判定（Phase2A） ----------
+  const straightLineDistanceM = typeof turf !== 'undefined' && selectedDestination
+    ? turf.distance([pos.lon, pos.lat], [selectedDestination.lon, selectedDestination.lat], { units: 'kilometers' }) * 1000
+    : null;
+  const { remainingDistanceM, remainingSeconds } = navigationProgress.update(currentRoute, trackResult);
+
+  const arrived = arrivalTracker.update({
+    straightLineDistanceM,
+    routeRemainingDistanceM: remainingDistanceM,
+    speedMPS: pos.speed,
+    gpsAccuracyM: pos.accuracy
+  });
+
+  if (arrived) {
+    appendLogEntry({
+      timestamp: new Date().toISOString(),
+      recordReason: 'arrival',
+      testRouteId: testRouteSelect.value,
+      lat: pos.lat, lon: pos.lon, gpsAccuracy: pos.accuracy, speed: pos.speed,
+      roadName: snap.roadName, roadClass: snap.roadClass,
+      laneCount: snap.laneCount, lanesRaw: snap.lanesRaw,
+      mapboxRecommendedLanes: snap.mapboxRecommendedLanes,
+      smartLaneRecommendedLanes: snap.smartLaneRecommendedLanes,
+      recommendationMatched: snap.recommendationMatched,
+      nextManeuver: snap.nextManeuver, distanceToNext: snap.distanceToNext,
+      followingManeuver: snap.followingManeuver, distanceToFollowing: snap.distanceToFollowing,
+      nextRoadName: snap.nextRoadName, nextRoadLaneCount: snap.nextRoadLaneCount,
+      nextRoadLanesRaw: snap.nextRoadLanesRaw,
+      confidence: snap.confidence, reason: snap.reason, gpsDowngraded: snap.gpsDowngraded,
+      missingFields: snap.missingFields
+    });
+    handleArrival();
+    return;
+  }
+
+  // ---------- 実走用ナビパネル＋標準の右左折音声案内（Phase2A） ----------
+  const smartLaneGuide = renderSmartLaneGuide(advice, input.currentRoad.lanes);
+  renderNavigationPanel({
+    phase: 'guiding',
+    maneuver: input.currentManeuver,
+    distanceToManeuverText: formatDistance(trackResult.distanceToCurrentManeuver),
+    roadName: input.currentRoad.name,
+    smartLane: smartLaneGuide,
+    eta: formatETA(Date.now(), remainingSeconds),
+    remainingTime: formatDuration(remainingSeconds),
+    remainingDistance: formatDistance(remainingDistanceM)
+  });
+
+  voiceScheduler.update({
+    maneuverSignature: String(stepIndex),
+    distanceToManeuverM: trackResult.distanceToCurrentManeuver,
+    roadClass: input.currentRoad.roadClass,
+    speedMPS: pos.speed,
+    roadName: input.nextRoad?.name ?? null,
+    maneuver: input.currentManeuver,
+    smartLanePhrase: advice.phrase,
+    smartLaneConfidence: advice.confidence
+  });
+
   // ---------- 走行ログ（交差点通過時 ＋ LOG.INTERVAL_SECONDSごと） ----------
   const now = Date.now();
   const stepChanged = stepIndex !== lastLoggedStepIndex;
@@ -350,20 +423,33 @@ function processNavUpdate(pos) {
     lastLoggedStepIndex = stepIndex;
   }
 
-  // ---------- 自動再ルート（逸脱検知、最短10秒間隔） ----------
+  // ---------- 自動再ルート（逸脱検知、最短10秒間隔＋回数上限） ----------
   if (!rerouting && rerouter.shouldReroute(trackResult.isOffRoute, now) && selectedDestination) {
-    rerouting = true;
-    setStatus('ルートから外れました。再検索中…');
-    fetchRoute({ origin: { lat: pos.lat, lon: pos.lon }, destination: selectedDestination, token: MAPBOX_TOKEN })
-      .then((route) => {
-        currentRoute = route;
-        tracker = createRouteTracker(route);
-        lastLoggedStepIndex = -1;
-        drawRoute(map, route.geometry);
-        setStatus('再ルートしました');
-      })
-      .catch((err) => setStatus(`再ルートエラー: ${err.message}`, true))
-      .finally(() => { rerouting = false; });
+    const retryCheck = rerouteRetryPolicy.canRetry(now);
+    if (!retryCheck.ok) {
+      showStatusBanner(describeRouteFetchFailure(retryCheck));
+    } else {
+      rerouting = true;
+      rerouteRetryPolicy.recordAttempt(now);
+      setStatus('ルートから外れました。再検索中…');
+      fetchRoute({ origin: { lat: pos.lat, lon: pos.lon }, destination: selectedDestination, token: MAPBOX_TOKEN })
+        .then((route) => {
+          currentRoute = route;
+          tracker = createRouteTracker(route);
+          navigationProgress.reset();
+          voiceScheduler.reset();
+          lastLoggedStepIndex = -1;
+          drawRoute(map, route.geometry);
+          setStatus('再ルートしました');
+          rerouteRetryPolicy.reset();
+          hideStatusBanner();
+        })
+        .catch((err) => {
+          setStatus(`再ルートエラー: ${err.message}`, true);
+          showStatusBanner(describeRouteFetchFailure(rerouteRetryPolicy.canRetry(Date.now())));
+        })
+        .finally(() => { rerouting = false; });
+    }
   }
 }
 
@@ -385,11 +471,17 @@ function onPositionUpdate(pos) {
     setStatus('地図+GPS OK（Step 2完了）');
   }
 
+  // 位置情報が正常に取れているので、GPS関連のバナーは消す（オフライン表示中なら維持する）。
+  if (navigator.onLine) hideStatusBanner();
+
   processNavUpdate(pos);
 }
 
 function onPositionError(err) {
   setStatus(`GPSエラー：${err.message ?? '取得できません'}`, true);
+  // 通信バナーが既にオフライン表示中なら、GPSエラーで上書きしない
+  // （利用者にとって「まず通信を確認する」方が優先度が高いため）。
+  if (navigator.onLine) showStatusBanner(describeGeolocationError(err));
 }
 
 // ---------- 地図の読み込み完了後に開始 ----------
@@ -411,9 +503,28 @@ window.addEventListener('beforeunload', () => {
 
 // ---------- ナビ開始／終了：画面消灯防止・音声解禁・ルート取得 ----------
 const btnStart = document.getElementById('btnStart');
-const guideMain = document.getElementById('guideMain');
 let navActive = false;
 let wakeLockSentinel = null;
+
+// 実走用ナビパネルの初期表示（未開始状態）。
+renderNavigationPanel({
+  phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null,
+  smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
+});
+
+// ---------- 通信状態の表示 ----------
+// 技術的なエラー文をそのまま出さず、利用者が次に何をすればよいかを日本語で示す。
+function updateConnectivityBanner() {
+  const message = describeNetworkStatus(navigator.onLine);
+  if (message) {
+    showStatusBanner(message);
+  } else {
+    hideStatusBanner();
+  }
+}
+window.addEventListener('online', updateConnectivityBanner);
+window.addEventListener('offline', updateConnectivityBanner);
+updateConnectivityBanner();
 
 async function acquireWakeLock() {
   wakeLockSentinel = await requestWakeLock();
@@ -437,7 +548,7 @@ async function startNav() {
         // ルート取得中は連打で複数回fetchが走らないようボタンを無効化する
         // （navSession自体も二重起動を防ぐが、UI上も分かりやすく無効化する）。
         btnStart.disabled = true;
-        guideMain.textContent = 'ルート取得中…';
+        showStatusBanner('ルート取得中…');
       },
       onSuccess: async (route) => {
         currentRoute = route;
@@ -445,11 +556,15 @@ async function startNav() {
         lastLoggedStepIndex = -1;
         drawRoute(map, route.geometry);
 
+        // 前回のナビ終了時にvoiceSchedulerは無効化されている(stop())ため、
+        // 新しいナビ開始のたびに明示的に有効化し直す。
+        voiceScheduler.reset();
+
         navActive = true;
         btnStart.classList.add('active');
         btnStart.setAttribute('aria-pressed', 'true');
         btnStart.textContent = 'ナビ終了';
-        guideMain.textContent = 'ナビ中';
+        hideStatusBanner();
         speak('ナビを開始します');
 
         // 成功時だけWake Lockを取得する。
@@ -465,8 +580,12 @@ async function startNav() {
         btnStart.classList.remove('active');
         btnStart.setAttribute('aria-pressed', 'false');
         btnStart.textContent = 'ナビ開始';
-        guideMain.textContent = 'ナビ未開始';
+        renderNavigationPanel({
+          phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null,
+          smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
+        });
         setStatus(`ルート取得エラー: ${err.message}`, true);
+        showStatusBanner(describeRouteFetchFailure({ ok: false }));
         speak('ルートを取得できませんでした');
       }
     }
@@ -481,23 +600,51 @@ async function startNav() {
   btnStart.disabled = false;
 }
 
-function stopNav() {
+// ナビを終える際の共通後始末（手動停止・到着の両方から呼ばれる）。
+// 「案内を止める」処理を一箇所にまとめ、片方だけ更新し忘れる事故を防ぐ。
+function resetNavState() {
   navSession.stop();
   navActive = false;
   btnStart.classList.remove('active');
   btnStart.setAttribute('aria-pressed', 'false');
   btnStart.textContent = 'ナビ開始';
-  guideMain.textContent = 'ナビ未開始';
 
   currentRoute = null;
   tracker = null;
   lastLoggedStepIndex = -1;
   clearRoute(map);
 
+  navigationProgress.reset();
+  arrivalTracker.reset();
+  voiceScheduler.stop();
+  rerouteRetryPolicy.reset();
+
   if (wakeLockSentinel) {
     wakeLockSentinel.release();
     wakeLockSentinel = null;
   }
+}
+
+function stopNav() {
+  resetNavState();
+  renderNavigationPanel({
+    phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null,
+    smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
+  });
+  hideStatusBanner();
+}
+
+// 目的地到着時の後始末（3-4）。手動停止(stopNav)と違い、到着メッセージを
+// 音声で知らせ、パネルを「到着」状態にしてから共通の後始末を行う。
+function handleArrival() {
+  cancelSpeech();
+  speak('目的地周辺です。ナビを終了します');
+  renderNavigationPanel({
+    phase: 'arrived', maneuver: null, distanceToManeuverText: '', roadName: null,
+    smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
+  });
+  resetNavState();
+  hideStatusBanner();
 }
 
 btnStart.addEventListener('click', () => {

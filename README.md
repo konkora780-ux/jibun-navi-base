@@ -4,7 +4,7 @@
 
 アプリ名：**じぶんNaviベース**（画面表示・リポジトリ名・ドキュメントはすべてこの名前で統一します）
 
-現在の進捗：**Phase 1 / Step 1 完了**
+現在の進捗：**Phase 1（Step 1〜11）実装・自動テスト完了／Phase 2（全画面UI・設定画面・音声検索）実装済み／Phase 2A（実走用ナビパネル・到着判定・標準音声案内）実装・自動テスト完了**。実車での走行確認は今後実施予定。Phase 2B以降は設計のみ（`docs/04_COCCHi比較・今後の改善計画.md` 参照、未実装・外部API未登録）。
 
 ---
 
@@ -70,22 +70,29 @@ export const MAPBOX_TOKEN = 'pk.ここに自分のトークンを貼る';
 ## ファイル構成
 
 ```
-carnavi/
+jibun-navi-base/
 ├─ index.html
+├─ settings.html     ← 設定画面
+├─ stats.html        ← 走行ログ集計画面
+├─ manifest.json
 ├─ css/style.css
 ├─ js/
 │   ├─ config.js     ← トークン・しきい値定数
 │   ├─ main.js       ← 起動・全体の配線
-│   ├─ core/         ← 依存ゼロ。将来Android移植でそのまま使う
+│   ├─ core/         ← 依存ゼロ。将来Android移植でそのまま使う（純粋関数のみ）
 │   ├─ platform/     ← Mapbox・ブラウザAPI依存
-│   ├─ nav/          ← ナビ進行の自前実装
-│   ├─ ui/
-│   └─ log/
+│   ├─ nav/          ← ナビ進行の自前実装（状態管理。DOM非依存）
+│   ├─ ui/           ← DOM描画
+│   └─ log/          ← 走行ログ
 ├─ tests/
+│   ├─ smartLane.test.html   ← SmartLane本体（全20ケース）
+│   └─ appLogic.test.html    ← 設定検証・ナビ状態遷移・Phase2A（ナビパネル・到着判定・音声案内等）
 └─ README.md
 ```
 
-設計方針・仕様は `CLAUDE.md` `00_調査報告.md` `01_SmartLane仕様.md` `02_Phase1実装計画.md` を参照。
+設計方針・仕様は `CLAUDE.md` `docs/00_調査報告.md` `docs/01_SmartLane仕様.md` `docs/02_Phase1実装計画.md` を参照。
+COCCHiとの比較・Phase 2B以降の計画（設計のみ・未実装）は `docs/04_COCCHi比較・今後の改善計画.md` を参照。
+Phase 2A実走確認チェックリスト（同乗者向け）は `docs/05_Phase2A実走確認チェックリスト.md` を参照。
 
 ---
 

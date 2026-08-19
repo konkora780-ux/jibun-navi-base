@@ -100,6 +100,27 @@ export const TERRAIN = {
 };
 
 // ============================================================
+// 目的地到着の判定（Phase 2A）
+// GPS誤差だけで早期に「到着」と誤判定しないよう、複数条件を組み合わせる。
+// 詳細はcore/arrivalJudge.js・nav/arrivalTracker.jsを参照。
+// ============================================================
+export const ARRIVAL = {
+  RADIUS_M: 30,              // 目的地からこの距離(m)以内を到着候補とする
+  MAX_GPS_ACCURACY_M: 30,    // これを超える(または取得不可の)GPS精度では到着判定しない
+  MAX_SPEED_MPS: 8,          // これを超える速度(約29km/h)では到着判定しない
+  SUSTAIN_SECONDS: 5         // この秒数、到着候補の状態が続いたら正式に到着とする
+};
+
+// ============================================================
+// 外部API（Mapbox）の再試行制限
+// 通信エラー時に無制限リトライしないための上限。課金事故防止も兼ねる。
+// ============================================================
+export const API_RETRY = {
+  MAX_ATTEMPTS: 3,           // 1回の要求につき最大この回数まで再試行する
+  INTERVAL_SECONDS: 5        // 再試行の間隔（秒）
+};
+
+// ============================================================
 // 設定画面（settings.html）の上書き値をここで反映する。
 // 上のexport constはオブジェクトなので、中身だけをObject.assignで書き換える。
 // こうすることで、他のファイルは今まで通り import して使うだけでよく、
@@ -109,7 +130,8 @@ export const TERRAIN = {
 export const SETTINGS_STORAGE_KEY = 'jibunnavi_base_settings_v1';
 
 export const SETTABLE_GROUPS = {
-  GPS_ACCURACY, LANE_CHANGE, REROUTE, MAP_FOLLOW, TERRAIN, SMART_LANE_ENABLED_ROAD_CLASSES
+  GPS_ACCURACY, LANE_CHANGE, REROUTE, MAP_FOLLOW, TERRAIN, SMART_LANE_ENABLED_ROAD_CLASSES,
+  ARRIVAL, API_RETRY
 };
 
 // 上書き前のデフォルト値を保持しておく。グループ内の値どうしが矛盾していた場合、
@@ -150,6 +172,16 @@ export const SETTINGS_SCHEMA = {
     secondary: { type: 'boolean' },
     street: { type: 'boolean' },
     unknown: { type: 'boolean' }
+  },
+  ARRIVAL: {
+    RADIUS_M: { type: 'number', min: 5, max: 200 },
+    MAX_GPS_ACCURACY_M: { type: 'number', min: 5, max: 200 },
+    MAX_SPEED_MPS: { type: 'number', min: 1, max: 30 },
+    SUSTAIN_SECONDS: { type: 'number', min: 1, max: 60 }
+  },
+  API_RETRY: {
+    MAX_ATTEMPTS: { type: 'number', min: 1, max: 10 },
+    INTERVAL_SECONDS: { type: 'number', min: 1, max: 60 }
   }
 };
 

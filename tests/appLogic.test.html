@@ -30,11 +30,34 @@
 <!-- renderDestResultItemのテスト用に実際にDOMへ挿入する非表示コンテナ -->
 <ul id="sandbox"></ul>
 
+<!-- renderNavigationPanel（実走用ナビパネル）のテスト用に、index.html#guidebarと同じID構成を再現する -->
+<div id="navSandbox" style="display:none">
+  <div id="navStatusBanner"></div>
+  <div id="navIcon"></div>
+  <div id="navDistance"></div>
+  <div id="navRoadName"></div>
+  <div id="navSmartLaneText"></div>
+  <div id="navLanes"></div>
+  <span id="navEta"></span>
+  <span id="navRemainingTime"></span>
+  <span id="navRemainingDistance"></span>
+</div>
+
 <script type="module">
 import { validateSettingValue, validateGroupConsistency } from '../js/config.js';
 import { canStartNav } from '../js/nav/navGuard.js';
 import { createNavSession } from '../js/nav/navSession.js';
 import { renderDestResultItem } from '../js/ui/destResultsView.js';
+import { formatDistance, formatDuration, formatETA } from '../js/core/formatNavigation.js';
+import { isWithinArrivalRange } from '../js/core/arrivalJudge.js';
+import { decideDistanceAnnouncement, composeAnnouncementText, GENERAL_ROAD_THRESHOLDS_M, HIGHWAY_THRESHOLDS_M } from '../js/core/voiceDecision.js';
+import { createArrivalTracker } from '../js/nav/arrivalTracker.js';
+import { createNavigationProgress } from '../js/nav/navigationProgress.js';
+import { createVoiceScheduler } from '../js/nav/voiceScheduler.js';
+import { createApiRetryPolicy } from '../js/nav/apiRetryPolicy.js';
+import { renderManeuverIcon } from '../js/ui/maneuverIcon.js';
+import { renderNavigationPanel } from '../js/ui/navigationPanel.js';
+import { renderSmartLaneGuide } from '../js/ui/smartLaneGuide.js';
 
 const cases = [];
 function test(description, fn) {
@@ -326,6 +349,301 @@ test('検索結果はクリックでonSelectが呼ばれる', () => {
   const li = renderDestResultItem(result, (r) => { selected = r; });
   li.click();
   assertEqual(selected, result, 'onSelectに渡された値');
+});
+
+// ==================== Phase 2A ====================
+
+// ---------- formatNavigation（距離・時間・ETA表示） ----------
+test('formatDistance: 300mは近距離として50m単位に丸める', () => {
+  assertEqual(formatDistance(320), '300 m', '320m→300m丸め');
+});
+test('formatDistance: 45mは100m未満なので10m単位に丸める', () => {
+  assertEqual(formatDistance(44), '40 m', '44m→40m丸め');
+});
+test('formatDistance: 1500mは1.5kmとして表示する', () => {
+  assertEqual(formatDistance(1500), '1.5 km', 'km表示');
+});
+test('formatDistance: NaNは"—"を返す', () => {
+  assertEqual(formatDistance(NaN), '—', 'NaN');
+});
+test('formatDistance: Infinityは"—"を返す', () => {
+  assertEqual(formatDistance(Infinity), '—', 'Infinity');
+});
+test('formatDistance: 負数は"—"を返す', () => {
+  assertEqual(formatDistance(-10), '—', '負数');
+});
+test('formatDuration: 125秒は2分（分単位に四捨五入）', () => {
+  assertEqual(formatDuration(125), '2分', '2分丸め（125秒=2.08分→round=2分）');
+});
+test('formatDuration: 3900秒は1時間5分', () => {
+  assertEqual(formatDuration(3900), '1時間5分', '1時間5分');
+});
+test('formatDuration: NaN/負数は"—"を返す', () => {
+  assertEqual(formatDuration(NaN), '—', 'NaN');
+  assertEqual(formatDuration(-5), '—', '負数');
+});
+test('formatETA: 不正な残り時間(Infinity)は"—"を返す', () => {
+  assertEqual(formatETA(Date.now(), Infinity), '—', 'Infinity');
+});
+test('formatETA: 正常な値はHH:MM形式を返す', () => {
+  const now = new Date('2026-01-01T10:00:00').getTime();
+  assertEqual(formatETA(now, 600), '10:10', '10分後');
+});
+
+// ---------- arrivalJudge（到着の瞬間判定） ----------
+const ARRIVAL_CFG = { RADIUS_M: 30, MAX_GPS_ACCURACY_M: 30, MAX_SPEED_MPS: 8 };
+test('到着判定: 直線距離・GPS精度・速度すべて条件内なら到着範囲内', () => {
+  const r = isWithinArrivalRange({ straightLineDistanceM: 10, routeRemainingDistanceM: 10, speedMPS: 1, gpsAccuracyM: 10 }, ARRIVAL_CFG);
+  assertEqual(r, true, '到着範囲内');
+});
+test('到着判定: GPS精度が悪い(取得不可)場合は近距離でも到着扱いにしない', () => {
+  const r = isWithinArrivalRange({ straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: null }, ARRIVAL_CFG);
+  assertEqual(r, false, 'GPS精度不明では到着としない');
+});
+test('到着判定: GPS精度がMAX_GPS_ACCURACY_Mを超える場合は到着扱いにしない', () => {
+  const r = isWithinArrivalRange({ straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: 50 }, ARRIVAL_CFG);
+  assertEqual(r, false, 'GPS精度が悪いので到着としない');
+});
+test('到着判定: 速度が速すぎる場合（通過中）は到着扱いにしない', () => {
+  const r = isWithinArrivalRange({ straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 20, gpsAccuracyM: 10 }, ARRIVAL_CFG);
+  assertEqual(r, false, '速すぎるので到着としない');
+});
+test('到着判定: 直線距離が範囲外なら到着扱いにしない', () => {
+  const r = isWithinArrivalRange({ straightLineDistanceM: 100, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: 10 }, ARRIVAL_CFG);
+  assertEqual(r, false, '直線距離が遠い');
+});
+
+// ---------- arrivalTracker（到着の継続時間管理） ----------
+test('到着トラッカー: 範囲内に入った直後は到着と判定しない（継続時間不足）', () => {
+  const tracker = createArrivalTracker({ RADIUS_M: 30, MAX_GPS_ACCURACY_M: 30, MAX_SPEED_MPS: 8, SUSTAIN_SECONDS: 5 });
+  const snap = { straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: 10 };
+  const r = tracker.update(snap, 1000);
+  assertEqual(r, false, '継続時間不足でまだ到着していない');
+});
+test('到着トラッカー: SUSTAIN_SECONDS経過後にtrueになる', () => {
+  const tracker = createArrivalTracker({ RADIUS_M: 30, MAX_GPS_ACCURACY_M: 30, MAX_SPEED_MPS: 8, SUSTAIN_SECONDS: 5 });
+  const snap = { straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: 10 };
+  tracker.update(snap, 1000);
+  const r = tracker.update(snap, 6001);
+  assertEqual(r, true, '5秒経過後は到着');
+});
+test('到着トラッカー: 途中で範囲外に出ると継続時間がリセットされる', () => {
+  const tracker = createArrivalTracker({ RADIUS_M: 30, MAX_GPS_ACCURACY_M: 30, MAX_SPEED_MPS: 8, SUSTAIN_SECONDS: 5 });
+  const within = { straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: 10 };
+  const outside = { straightLineDistanceM: 100, routeRemainingDistanceM: 100, speedMPS: 0, gpsAccuracyM: 10 };
+  tracker.update(within, 1000);
+  tracker.update(outside, 2000); // 範囲外に出てリセット
+  const r = tracker.update(within, 6500); // 再突入後まだ5秒経っていない
+  assertEqual(r, false, '範囲外を挟むと継続時間がリセットされ、到着していない');
+});
+test('到着トラッカー: GPS精度が悪いまま近距離を維持しても到着と誤判定しない', () => {
+  const tracker = createArrivalTracker({ RADIUS_M: 30, MAX_GPS_ACCURACY_M: 30, MAX_SPEED_MPS: 8, SUSTAIN_SECONDS: 5 });
+  const badGps = { straightLineDistanceM: 5, routeRemainingDistanceM: 5, speedMPS: 0, gpsAccuracyM: 999 };
+  tracker.update(badGps, 1000);
+  const r = tracker.update(badGps, 10000);
+  assertEqual(r, false, 'GPS精度が悪いままでは到着しない');
+});
+
+// ---------- voiceDecision（標準の右左折案内の発話タイミング・文言） ----------
+test('voiceDecision: 一般道で700m以内に入ると"700"キーの案内を返す', () => {
+  const r = decideDistanceAnnouncement({ distanceToManeuverM: 650, roadClass: 'primary', speedMPS: 10, announcedKeys: new Set() });
+  assertEqual(r?.key, '700', '700mキー');
+});
+test('voiceDecision: 一度案内した距離段階は再度案内しない（重複防止）', () => {
+  const announced = new Set(['700']);
+  const r = decideDistanceAnnouncement({ distanceToManeuverM: 650, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(r, null, '700mは既に案内済みなのでnull');
+});
+test('voiceDecision: 高速道路では2000/1000/500mのしきい値を使う', () => {
+  const r = decideDistanceAnnouncement({ distanceToManeuverM: 1800, roadClass: 'motorway', speedMPS: 25, announcedKeys: new Set() });
+  assertEqual(r?.key, '2000', '高速道路は2000mしきい値');
+});
+test('voiceDecision: 距離が不正(NaN/負数)ならnullを返す', () => {
+  assertEqual(decideDistanceAnnouncement({ distanceToManeuverM: NaN, roadClass: 'primary', speedMPS: 0, announcedKeys: new Set() }), null, 'NaN');
+  assertEqual(decideDistanceAnnouncement({ distanceToManeuverM: -5, roadClass: 'primary', speedMPS: 0, announcedKeys: new Set() }), null, '負数');
+});
+test('composeAnnouncementText: SmartLaneのConfidenceがhigh/mediumのときだけ文言を混ぜる', () => {
+  const high = composeAnnouncementText({ thresholdKey: '300', distanceM: 300, roadName: '県道4号', maneuver: { type: 'turn', modifier: 'right' }, smartLanePhrase: '右側車線がおすすめです', smartLaneConfidence: 'high' });
+  assertEqual(high.includes('右側車線がおすすめです'), true, 'high confidenceでは混ぜる');
+
+  const low = composeAnnouncementText({ thresholdKey: '300', distanceM: 300, roadName: '県道4号', maneuver: { type: 'turn', modifier: 'right' }, smartLanePhrase: '右側車線がおすすめです', smartLaneConfidence: 'low' });
+  assertEqual(low.includes('右側車線がおすすめです'), false, 'low confidenceでは混ぜない（安全原則5）');
+
+  const unknown = composeAnnouncementText({ thresholdKey: '300', distanceM: 300, roadName: '県道4号', maneuver: { type: 'turn', modifier: 'right' }, smartLanePhrase: null, smartLaneConfidence: 'unknown' });
+  assertEqual(unknown.includes('undefined'), false, 'SmartLaneフレーズが無くても文が壊れない');
+});
+test('composeAnnouncementText: SmartLane情報が無くても標準の右左折案内文は生成される', () => {
+  const text = composeAnnouncementText({ thresholdKey: 'immediate', distanceM: 20, roadName: null, maneuver: { type: 'turn', modifier: 'left' }, smartLanePhrase: null, smartLaneConfidence: null });
+  assertEqual(typeof text === 'string' && text.length > 0, true, '標準案内文が生成される');
+});
+
+// ---------- voiceScheduler（発話タイミングの状態管理：重複防止・reroute時リセット・終了後は発話しない） ----------
+function baseVoiceState(overrides = {}) {
+  return {
+    maneuverSignature: '0', distanceToManeuverM: 650, roadClass: 'primary', speedMPS: 10,
+    roadName: 'テスト道路', maneuver: { type: 'turn', modifier: 'right' },
+    smartLanePhrase: null, smartLaneConfidence: null,
+    ...overrides
+  };
+}
+test('voiceScheduler: 同じ距離段階を同じ曲がり角で連続通知しても2回目は発話しない（重複防止）', () => {
+  const scheduler = createVoiceScheduler();
+  const first = scheduler.update(baseVoiceState());
+  const second = scheduler.update(baseVoiceState());
+  assertEqual(typeof first, 'string', '1回目は発話する');
+  assertEqual(second, null, '2回目（同じ段階）は発話しない');
+});
+test('voiceScheduler: reroute相当でreset()すると、同じ距離段階でも再度発話する（安全原則：再ルート後は改めて案内）', () => {
+  const scheduler = createVoiceScheduler();
+  scheduler.update(baseVoiceState());
+  scheduler.reset();
+  const afterReset = scheduler.update(baseVoiceState());
+  assertEqual(typeof afterReset, 'string', 'reset後は再度発話する');
+});
+test('voiceScheduler: stop()（ナビ終了）後はupdate()を呼んでも発話しない', () => {
+  const scheduler = createVoiceScheduler();
+  scheduler.stop();
+  const r = scheduler.update(baseVoiceState());
+  assertEqual(r, null, 'ナビ終了後は発話しない');
+});
+test('voiceScheduler: 曲がり角(maneuverSignature)が変わると発話済み状態がリセットされる（次の交差点で改めて案内する）', () => {
+  const scheduler = createVoiceScheduler();
+  scheduler.update(baseVoiceState({ maneuverSignature: '0' }));
+  const nextManeuver = scheduler.update(baseVoiceState({ maneuverSignature: '1' }));
+  assertEqual(typeof nextManeuver, 'string', '次の曲がり角では改めて発話する');
+});
+test('voiceScheduler: SmartLaneのConfidenceがlowのときは音声に混ぜない', () => {
+  const scheduler = createVoiceScheduler();
+  const text = scheduler.update(baseVoiceState({ smartLanePhrase: '左側車線がおすすめです', smartLaneConfidence: 'low' }));
+  assertEqual(text?.includes('左側車線がおすすめです'), false, 'low confidenceでは音声に混ぜない');
+});
+
+// ---------- navigationProgress（残り距離・残り時間、reroute後の更新） ----------
+test('navigationProgress: 進行に伴い残り距離が減っていく', () => {
+  const progress = createNavigationProgress();
+  const route = { distance: 1000, duration: 200 };
+  const r1 = progress.update(route, { progressDistance: 100 });
+  const r2 = progress.update(route, { progressDistance: 400 });
+  assertEqual(r1.remainingDistanceM, 900, '進捗100m時点の残り距離');
+  assertEqual(r2.remainingDistanceM, 600, '進捗400m時点の残り距離');
+});
+test('navigationProgress: GPSのふらつきで進捗が一時的に後退しても残り距離は増えて見えない（単調減少）', () => {
+  const progress = createNavigationProgress();
+  const route = { distance: 1000, duration: 200 };
+  progress.update(route, { progressDistance: 400 }); // 残り600
+  const r = progress.update(route, { progressDistance: 350 }); // GPSのブレで後退（残りは650のはず）
+  assertEqual(r.remainingDistanceM, 600, '後退せず直前の値(600)を維持する');
+});
+test('navigationProgress: reroute後（ルートが変わり、reset()を呼んだ後）は新ルートの値に正しく更新される', () => {
+  const progress = createNavigationProgress();
+  const routeA = { distance: 1000, duration: 200 };
+  progress.update(routeA, { progressDistance: 900 }); // 残り100
+  progress.reset(); // reroute時に呼ばれる
+  const routeB = { distance: 2000, duration: 400 };
+  const r = progress.update(routeB, { progressDistance: 0 });
+  assertEqual(r.remainingDistanceM, 2000, '新ルートの残り距離が古いルートの値に引きずられない');
+});
+test('navigationProgress: route.distance/durationが不正な場合はnullを返す', () => {
+  const progress = createNavigationProgress();
+  const r = progress.update({ distance: NaN, duration: NaN }, { progressDistance: 0 });
+  assertEqual(r.remainingDistanceM, null, 'distanceがNaNならnull');
+  assertEqual(r.remainingSeconds, null, 'durationがNaNならnull');
+});
+
+// ---------- apiRetryPolicy（再試行回数の上限） ----------
+test('apiRetryPolicy: MAX_ATTEMPTS回までは再試行を許可する', () => {
+  const policy = createApiRetryPolicy({ MAX_ATTEMPTS: 3, INTERVAL_SECONDS: 5 });
+  let now = 0;
+  for (let i = 0; i < 3; i++) {
+    const check = policy.canRetry(now);
+    assertEqual(check.ok, true, `${i + 1}回目は許可される`);
+    policy.recordAttempt(now);
+    now += 6000; // INTERVAL_SECONDSより十分空ける
+  }
+});
+test('apiRetryPolicy: MAX_ATTEMPTSを超えると再試行を拒否する（無制限リトライ＝課金事故の防止）', () => {
+  const policy = createApiRetryPolicy({ MAX_ATTEMPTS: 3, INTERVAL_SECONDS: 5 });
+  let now = 0;
+  for (let i = 0; i < 3; i++) { policy.recordAttempt(now); now += 6000; }
+  const check = policy.canRetry(now);
+  assertEqual(check.ok, false, '上限超過');
+  assertEqual(check.reason, 'max-attempts', '理由はmax-attempts');
+});
+test('apiRetryPolicy: 最短間隔より早い再試行は拒否する', () => {
+  const policy = createApiRetryPolicy({ MAX_ATTEMPTS: 3, INTERVAL_SECONDS: 5 });
+  policy.recordAttempt(0);
+  const check = policy.canRetry(1000); // 5秒経っていない
+  assertEqual(check.ok, false, '間隔不足');
+  assertEqual(check.reason, 'too-soon', '理由はtoo-soon');
+});
+test('apiRetryPolicy: reset()すると再試行回数がクリアされる', () => {
+  const policy = createApiRetryPolicy({ MAX_ATTEMPTS: 3, INTERVAL_SECONDS: 5 });
+  let now = 0;
+  for (let i = 0; i < 3; i++) { policy.recordAttempt(now); now += 6000; }
+  policy.reset();
+  const check = policy.canRetry(now);
+  assertEqual(check.ok, true, 'reset後は再試行できる');
+});
+
+// ---------- maneuverIcon（方向アイコンの安全なフォールバック） ----------
+test('maneuverIcon: type=turn, modifier=leftはleft系アイコンを返す（straightとは異なる）', () => {
+  const left = renderManeuverIcon({ type: 'turn', modifier: 'left' });
+  const straight = renderManeuverIcon({ type: 'turn', modifier: 'straight' });
+  assertEqual(left !== straight, true, 'leftとstraightは別のSVG');
+});
+test('maneuverIcon: roundabout系のtypeはroundaboutアイコン(circle要素)を返す', () => {
+  const icon = renderManeuverIcon({ type: 'roundabout', modifier: null });
+  assertEqual(icon.includes('<circle'), true, 'roundaboutにはcircle要素が含まれる');
+});
+test('maneuverIcon: type=arriveはarriveアイコンを返す', () => {
+  const icon = renderManeuverIcon({ type: 'arrive', modifier: null });
+  const straight = renderManeuverIcon({ type: 'turn', modifier: 'straight' });
+  assertEqual(icon !== straight, true, 'arriveはstraightと異なる専用アイコン');
+});
+test('maneuverIcon: 未知のtype/modifierの組み合わせは推測せずstraight(汎用直進矢印)へ安全にフォールバックする', () => {
+  const unknown = renderManeuverIcon({ type: 'unknown-future-maneuver-type', modifier: 'unknown-modifier-xyz' });
+  const straight = renderManeuverIcon({ type: 'turn', modifier: 'straight' });
+  assertEqual(unknown, straight, '未知の組み合わせはstraightと同一のSVGになる');
+});
+test('maneuverIcon: maneuver自体がnull（ナビ未開始等）でも例外を投げずstraightへフォールバックする', () => {
+  const nullResult = renderManeuverIcon(null);
+  const straight = renderManeuverIcon({ type: 'turn', modifier: 'straight' });
+  assertEqual(nullResult, straight, 'nullでもstraightにフォールバック');
+});
+
+// ---------- smartLaneGuide（Confidenceごとの表示・音声可否の切り替え） ----------
+test('smartLaneGuide: confidence=lowのときは「参考程度」の控えめな文言になる', () => {
+  const r = renderSmartLaneGuide({ confidence: 'low', phrase: '左側車線がおすすめです', recommendedLanes: [0] }, [{ isActive: true, isValid: true }]);
+  assertEqual(r.text, '車線情報は参考程度です', 'low時の文言');
+});
+test('smartLaneGuide: confidence=unknownでも赤い大きなエラー表現にせず控えめな文言にする', () => {
+  const r = renderSmartLaneGuide({ confidence: 'unknown', phrase: null, recommendedLanes: [] }, null);
+  assertEqual(r.text, '車線情報を取得できません', 'unknown時の控えめな文言');
+});
+test('smartLaneGuide: confidence=highのときはphraseをそのまま強調表示に使う', () => {
+  const r = renderSmartLaneGuide({ confidence: 'high', phrase: '右側車線がおすすめです', recommendedLanes: [1] }, [{ isActive: true, isValid: true }]);
+  assertEqual(r.text, '右側車線がおすすめです', 'high時はphraseを表示');
+});
+
+// ---------- navigationPanel（実走用ナビパネルの描画・XSS安全性） ----------
+test('navigationPanel: 道路名に悪意あるHTML文字列が含まれてもタグとして実体化しない（XSS対策）', () => {
+  const malicious = '<img src=x onerror="window.__navXssFired = true">';
+  renderNavigationPanel({
+    phase: 'guiding', maneuver: { type: 'turn', modifier: 'left' }, distanceToManeuverText: '300 m',
+    roadName: malicious, smartLane: null, eta: '10:00', remainingTime: '5分', remainingDistance: '300 m'
+  });
+  const roadNameEl = document.getElementById('navRoadName');
+  assertEqual(document.querySelectorAll('#navSandbox img').length, 0, 'imgタグが実体化していないこと');
+  assertEqual(window.__navXssFired, undefined, 'onerrorが発火していないこと');
+  assertEqual(roadNameEl.textContent, malicious, '文字列としてそのまま表示されていること');
+});
+test('navigationPanel: phase=idleのときは「ナビ未開始」を表示する', () => {
+  renderNavigationPanel({ phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null, smartLane: null, eta: '—', remainingTime: '', remainingDistance: '' });
+  assertEqual(document.getElementById('navRoadName').textContent, 'ナビ未開始', 'idle表示');
+});
+test('navigationPanel: phase=arrivedのときは到着メッセージを表示する', () => {
+  renderNavigationPanel({ phase: 'arrived', maneuver: null, distanceToManeuverText: '', roadName: null, smartLane: null, eta: '—', remainingTime: '', remainingDistance: '' });
+  assertEqual(document.getElementById('navRoadName').textContent, '目的地周辺です', '到着表示');
 });
 
 // ---------- 実行 ----------

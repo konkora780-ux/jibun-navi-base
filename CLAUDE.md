@@ -13,12 +13,16 @@
 - **テスト環境：iPhone の Safari**（ホーム画面に追加して全画面で使用）
 - **最終環境：Android AIBOX（車載ディスプレイ・横画面）のブラウザ、将来的にWebViewでAPK化**
 - **費用制約：¥0 で運用すること**
-- 現在地点：**Phase 1（車線データ検証アプリ）に着手する段階**
+- 現在地点：**Phase 1（Step 1〜11）実装・自動テスト完了。Phase 2（全画面UI・設定画面・音声検索）実装済み。Phase 2A（COCCHi等の他社カーナビを参考にした実走用ナビパネル・到着判定・標準音声案内・SmartLane専用表示・通信/GPS状態表示）実装・自動テスト完了。** 実車での走行確認はこれから。Phase 2B以降は設計のみで未実装（`docs/04_COCCHi比較・今後の改善計画.md`参照、外部APIは何も登録・契約していない）。
 
 同梱ドキュメント（必ず全部読むこと）：
-- `00_調査報告.md` — 技術調査結果。重要な制約が書いてある
-- `01_SmartLane仕様.md` — 中核ロジックの仕様
-- `02_Phase1実装計画.md` — 今回作るものの詳細手順
+- `docs/00_調査報告.md` — 技術調査結果。重要な制約が書いてある
+- `docs/01_SmartLane仕様.md` — 中核ロジックの仕様
+- `docs/02_Phase1実装計画.md` — Phase 1（Step 1〜11）の詳細手順
+- `docs/04_COCCHi比較・今後の改善計画.md` — 他社カーナビ(COCCHi)との比較とPhase 2B以降の設計（未実装）
+- `docs/05_Phase2A実走確認チェックリスト.md` — 実走確認チェックリスト（同乗者用）
+
+**他社カーナビ（COCCHi等）の意匠・画像・アイコン・文言はコピーしないこと。** 参考にするのは「情報の優先順位」「操作性」「機能構成」の考え方のみ。アイコンは必ず自作する（`js/ui/maneuverIcon.js`）。
 
 ## 開発者について
 
@@ -65,34 +69,54 @@ Mapbox GL JS のバージョンは実装時に最新安定版を確認するこ�
 ## ディレクトリ構成
 
 ```
-carnavi/
+jibun-navi-base/
 ├─ index.html
+├─ settings.html            ← 設定画面（しきい値の変更・保存前後で検証）
+├─ stats.html                ← 走行ログ集計画面
+├─ manifest.json
 ├─ css/
 │   └─ style.css
 ├─ js/
-│   ├─ config.js            ← トークン・定数
+│   ├─ config.js            ← トークン・定数（SETTINGS_SCHEMAで範囲・整合性を検証）
 │   ├─ main.js              ← 起動・全体の配線
-│   ├─ core/                ← ★依存ゼロ。将来Android移植時もそのまま使う
+│   ├─ core/                ← ★依存ゼロ。将来Android移植時もそのまま使う（純粋関数のみ）
 │   │   ├─ models.js        ← データ型の定義とファクトリ
 │   │   ├─ smartLane.js     ← 中核ロジック
-│   │   └─ phrase.js        ← 日本語文言の生成
+│   │   ├─ phrase.js        ← 日本語文言の生成
+│   │   ├─ compare.js       ← Mapbox推奨との比較
+│   │   ├─ formatNavigation.js      ← 距離・時間・ETAの表示フォーマット（Phase2A）
+│   │   ├─ arrivalJudge.js          ← 到着の瞬間判定（Phase2A）
+│   │   ├─ voiceDecision.js         ← 標準音声案内の発話タイミング・文言（Phase2A）
+│   │   └─ connectivityMessages.js  ← 通信/GPSエラーの日本語メッセージ（Phase2A）
 │   ├─ platform/            ← 外部APIに依存する層
 │   │   ├─ directions.js    ← Directions API 呼び出し + 正規化
-│   │   ├─ geocoding.js     ← 目的地検索
+│   │   ├─ geocoding.js     ← 目的地検索（Search Box API）
+│   │   ├─ speechInput.js   ← 音声検索（Web Speech API、非対応時はテキスト検索が独立して動く）
 │   │   ├─ location.js      ← Geolocation + Wake Lock
 │   │   ├─ mapView.js       ← Mapbox GL JS のラッパ
-│   │   └─ voice.js         ← 音声案内
-│   ├─ nav/                 ← ナビ進行の自前実装
+│   │   └─ voice.js         ← 音声案内（speak/cancelSpeech）
+│   ├─ nav/                 ← ナビ進行の自前実装（状態管理。DOM非依存）
 │   │   ├─ routeTracker.js  ← 自車位置→ルート上の位置・残距離・現在step
-│   │   └─ rerouter.js      ← 逸脱検知と再ルート
+│   │   ├─ rerouter.js      ← 逸脱検知
+│   │   ├─ navSession.js    ← ナビ開始の状態遷移（idle/loading/active、二重起動防止）
+│   │   ├─ navGuard.js      ← ナビ開始可否の判定
+│   │   ├─ arrivalTracker.js       ← 到着継続時間の管理（Phase2A）
+│   │   ├─ navigationProgress.js   ← 残り距離・残り時間の管理（Phase2A）
+│   │   ├─ voiceScheduler.js       ← 音声案内の発話タイミング管理（Phase2A）
+│   │   └─ apiRetryPolicy.js       ← 再ルートAPIの再試行回数制限（Phase2A）
 │   ├─ ui/
 │   │   ├─ debugPanel.js
-│   │   └─ laneView.js      ← 車線矢印の描画
+│   │   ├─ laneView.js            ← DEBUGパネル用の車線矢印描画
+│   │   ├─ destResultsView.js     ← 検索候補一覧の描画
+│   │   ├─ navigationPanel.js     ← 実走用ナビ案内パネルの描画（Phase2A）
+│   │   ├─ maneuverIcon.js        ← 自作の方向アイコン（Phase2A、未知の組み合わせはstraightへ安全フォールバック）
+│   │   └─ smartLaneGuide.js      ← 実走用パネルのSmartLane表示（Confidenceごとの表示切替、Phase2A）
 │   └─ log/
 │       └─ driveLog.js      ← 走行ログの記録とエクスポート
 ├─ tests/
 │   ├─ fixtures/*.json      ← SmartLaneのテストケース
-│   └─ smartLane.test.html  ← ブラウザで開くだけのテストページ
+│   ├─ smartLane.test.html  ← SmartLane本体のテスト（全20ケース）
+│   └─ appLogic.test.html   ← 設定検証・ナビ状態遷移・XSS安全性・Phase2A（79ケース）
 └─ README.md
 ```
 

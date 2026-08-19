@@ -102,6 +102,26 @@ const FIELD_GROUPS = [
     fields: [
       { key: 'EXAGGERATION', label: '誇張率', unit: '倍', step: 0.1, min: 1, max: 3 }
     ]
+  },
+  {
+    title: '目的地到着の判定',
+    desc: 'GPS誤差だけで早く「到着」と判定してしまわないための条件。値の意味が分からない場合は初期値のままで問題ありません。',
+    group: 'ARRIVAL',
+    fields: [
+      { key: 'RADIUS_M', label: '到着候補とみなす距離', unit: 'm', step: 5, min: 5, max: 200 },
+      { key: 'MAX_GPS_ACCURACY_M', label: 'これを超える精度では判定しない', unit: 'm', step: 5, min: 5, max: 200 },
+      { key: 'MAX_SPEED_MPS', label: 'これを超える速度では判定しない', unit: 'm/秒', step: 1, min: 1, max: 30 },
+      { key: 'SUSTAIN_SECONDS', label: '到着候補の状態が続く必要がある秒数', unit: '秒', step: 1, min: 1, max: 60 }
+    ]
+  },
+  {
+    title: '外部API（Mapbox）の再試行制限',
+    desc: '通信エラー時に無制限リトライしないための上限。課金事故防止も兼ねます。',
+    group: 'API_RETRY',
+    fields: [
+      { key: 'MAX_ATTEMPTS', label: '最大再試行回数', unit: '回', step: 1, min: 1, max: 10 },
+      { key: 'INTERVAL_SECONDS', label: '再試行の間隔', unit: '秒', step: 1, min: 1, max: 60 }
+    ]
   }
 ];
 
