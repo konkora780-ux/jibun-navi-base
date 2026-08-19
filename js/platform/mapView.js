@@ -14,6 +14,7 @@ export function createMap({ container, style, token, center, zoom, pitch, bearin
     zoom,
     pitch,
     bearing,
+    language: 'ja', // 地名・道路名ラベルを日本語表示にする
     attributionControl: true
   });
 }
