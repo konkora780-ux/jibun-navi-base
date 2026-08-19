@@ -12,6 +12,16 @@ function el(id) {
   return document.getElementById(id);
 }
 
+// ナビ未開始時・GPSエラー等でバナー表示中は、実走に不要な行を隠して
+// パネルをコンパクトにする（案内中の情報を最優先で大きく見せるため）。
+let currentPhase = 'idle';
+let bannerVisible = false;
+
+function updateCompactState() {
+  const guidebar = el('guidebar');
+  guidebar.classList.toggle('compact', currentPhase !== 'guiding' || bannerVisible);
+}
+
 /**
  * @param {{
  *   phase: 'idle'|'guiding'|'arrived',
@@ -28,7 +38,18 @@ export function renderNavigationPanel(state) {
     smartLane, eta, remainingTime, remainingDistance
   } = state;
 
-  el('navIcon').innerHTML = renderManeuverIcon(phase === 'arrived' ? { type: 'arrive' } : maneuver);
+  currentPhase = phase;
+  updateCompactState();
+
+  // ナビ未開始時は「直進」を含めて方向アイコンを一切出さない
+  // （まだ案内が無いのに直進矢印が出ると誤解を招くため）。
+  if (phase === 'guiding') {
+    el('navIcon').innerHTML = renderManeuverIcon(maneuver);
+  } else if (phase === 'arrived') {
+    el('navIcon').innerHTML = renderManeuverIcon({ type: 'arrive' });
+  } else {
+    el('navIcon').innerHTML = '';
+  }
   el('navDistance').textContent = phase === 'guiding' ? distanceToManeuverText : '';
 
   const roadNameEl = el('navRoadName');
@@ -63,10 +84,14 @@ export function showStatusBanner(message) {
   const banner = el('navStatusBanner');
   banner.textContent = message;
   banner.classList.remove('hidden');
+  bannerVisible = true;
+  updateCompactState();
 }
 
 export function hideStatusBanner() {
   const banner = el('navStatusBanner');
   banner.classList.add('hidden');
   banner.textContent = '';
+  bannerVisible = false;
+  updateCompactState();
 }

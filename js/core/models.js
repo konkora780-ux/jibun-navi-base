@@ -133,3 +133,16 @@ export function createSmartLaneAdvice({
     gpsDowngraded: Boolean(gpsDowngraded)
   };
 }
+
+/**
+ * advice.targetRoad（'current'|'next'）に対応するRoadSnapshotを返す。
+ * 表示・比較用のMapbox推奨車線抽出、SmartLane専用パネルの車線表示など、
+ * 「adviceが指しているのはどちらの道路か」を判定する箇所すべてで、
+ * この関数を唯一の判定元として使う（食い違いを防ぐため）。
+ * @param {{targetRoad:'current'|'next'}} advice
+ * @param {object} currentRoad
+ * @param {object|null} nextRoad
+ */
+export function pickTargetRoad(advice, currentRoad, nextRoad) {
+  return advice.targetRoad === 'next' ? nextRoad : currentRoad;
+}

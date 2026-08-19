@@ -42,3 +42,27 @@ export function formatETA(nowMs, remainingSeconds) {
   const mm = String(eta.getMinutes()).padStart(2, '0');
   return `${hh}:${mm}`;
 }
+
+/**
+ * 音声案内・画面表示の両方が同じ道路名を使うための、唯一の判定元。
+ * 「これから入る道路」を優先し、分からない場合だけ現在の道路名にフォールバックする。
+ * @param {{name:string|null}|null} currentRoad
+ * @param {{name:string|null}|null} nextRoad
+ * @returns {string|null}
+ */
+export function resolveUpcomingRoadName(currentRoad, nextRoad) {
+  return nextRoad?.name ?? currentRoad?.name ?? null;
+}
+
+/**
+ * 画面表示用のラベル。次の道路が分かる場合は「次：○○」、
+ * 現在道路へのフォールバック時はそのままの道路名を返す（現在地の道路を
+ * 「次」と呼ぶと誤解を招くため、prefixは次の道路が分かるときだけ付ける）。
+ * @param {{name:string|null}|null} currentRoad
+ * @param {{name:string|null}|null} nextRoad
+ * @returns {string} 道路名が全く分からない場合は「（道路名不明）」
+ */
+export function formatUpcomingRoadLabel(currentRoad, nextRoad) {
+  if (nextRoad?.name) return `次：${nextRoad.name}`;
+  return resolveUpcomingRoadName(currentRoad, nextRoad) ?? '（道路名不明）';
+}

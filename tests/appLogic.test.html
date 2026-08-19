@@ -31,7 +31,7 @@
 <ul id="sandbox"></ul>
 
 <!-- renderNavigationPanel（実走用ナビパネル）のテスト用に、index.html#guidebarと同じID構成を再現する -->
-<div id="navSandbox" style="display:none">
+<div id="guidebar" style="display:none">
   <div id="navStatusBanner"></div>
   <div id="navIcon"></div>
   <div id="navDistance"></div>
@@ -56,8 +56,11 @@ import { createNavigationProgress } from '../js/nav/navigationProgress.js';
 import { createVoiceScheduler } from '../js/nav/voiceScheduler.js';
 import { createApiRetryPolicy } from '../js/nav/apiRetryPolicy.js';
 import { renderManeuverIcon } from '../js/ui/maneuverIcon.js';
-import { renderNavigationPanel } from '../js/ui/navigationPanel.js';
+import { renderNavigationPanel, showStatusBanner, hideStatusBanner } from '../js/ui/navigationPanel.js';
 import { renderSmartLaneGuide } from '../js/ui/smartLaneGuide.js';
+import { pickTargetRoad } from '../js/core/models.js';
+import { resolveUpcomingRoadName, formatUpcomingRoadLabel } from '../js/core/formatNavigation.js';
+import { describeMapError, describeGpsAccuracyDegraded } from '../js/core/connectivityMessages.js';
 
 const cases = [];
 function test(description, fn) {
@@ -633,7 +636,7 @@ test('navigationPanel: 道路名に悪意あるHTML文字列が含まれても�
     roadName: malicious, smartLane: null, eta: '10:00', remainingTime: '5分', remainingDistance: '300 m'
   });
   const roadNameEl = document.getElementById('navRoadName');
-  assertEqual(document.querySelectorAll('#navSandbox img').length, 0, 'imgタグが実体化していないこと');
+  assertEqual(document.querySelectorAll('#guidebar img').length, 0, 'imgタグが実体化していないこと');
   assertEqual(window.__navXssFired, undefined, 'onerrorが発火していないこと');
   assertEqual(roadNameEl.textContent, malicious, '文字列としてそのまま表示されていること');
 });
@@ -644,6 +647,157 @@ test('navigationPanel: phase=idleのときは「ナビ未開始」を表示す�
 test('navigationPanel: phase=arrivedのときは到着メッセージを表示する', () => {
   renderNavigationPanel({ phase: 'arrived', maneuver: null, distanceToManeuverText: '', roadName: null, smartLane: null, eta: '—', remainingTime: '', remainingDistance: '' });
   assertEqual(document.getElementById('navRoadName').textContent, '目的地周辺です', '到着表示');
+});
+
+// ==================== Phase 2A 実走フィードバック対応 ====================
+
+// ---------- 距離音声案内の逆戻り防止 ----------
+test('voiceDecision: 20mから開始すると「まもなく」だけを発話し、700/300/100は消費されて二度と鳴らない', () => {
+  const announced = new Set();
+  const first = decideDistanceAnnouncement({ distanceToManeuverM: 20, roadClass: 'primary', speedMPS: 0, announcedKeys: announced });
+  assertEqual(first?.key, 'immediate', '最初は「まもなく」だけ');
+  announced.add(first.key);
+  (first.consumedKeys ?? []).forEach((k) => announced.add(k));
+  assertEqual([...announced].sort(), ['100', '300', '700', 'immediate'], '700/300/100も消費済みになる');
+
+  // 距離が離れた場合（GPSのブレ等）でも、消費済みの段階は二度と発話されない
+  [80, 250, 400, 650].forEach((d) => {
+    const r = decideDistanceAnnouncement({ distanceToManeuverM: d, roadClass: 'primary', speedMPS: 0, announcedKeys: announced });
+    assertEqual(r, null, `距離${d}mでも再発話しない`);
+  });
+});
+
+test('voiceDecision: 250mから開始した場合、700m案内は発話しない（すでに通過済みとして消費される）', () => {
+  const announced = new Set();
+  const r = decideDistanceAnnouncement({ distanceToManeuverM: 250, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(r?.key, '300', '一番近い300のみ発話される');
+  assertEqual(r?.consumedKeys, ['700'], '700は無音で消費される');
+  const text = composeAnnouncementText({ thresholdKey: r.key, distanceM: r.distanceM, roadName: null, maneuver: { type: 'turn', modifier: 'right' }, smartLanePhrase: null, smartLaneConfidence: null });
+  assertEqual(text.includes('700'), false, '発話文言に700mが含まれない');
+});
+
+test('voiceDecision: 800m→650mで700m案内は1回だけ発話する', () => {
+  const announced = new Set();
+  const atFar = decideDistanceAnnouncement({ distanceToManeuverM: 800, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(atFar, null, '800mではまだ何も発話しない');
+
+  const atNear = decideDistanceAnnouncement({ distanceToManeuverM: 650, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(atNear?.key, '700', '650mで700mが発話される');
+  announced.add(atNear.key);
+
+  const again = decideDistanceAnnouncement({ distanceToManeuverM: 650, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(again, null, '同じ650mで再度発話しない（1回だけ）');
+});
+
+test('voiceDecision: 距離が一時的に増えても（GPSのブレ等）同じ案内を繰り返さない', () => {
+  const announced = new Set(['700']); // 既に700mを発話済みの状態から始める
+  const jumpedFar = decideDistanceAnnouncement({ distanceToManeuverM: 720, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(jumpedFar, null, '距離が720mへ増えても700mは再発話しない');
+  const backNear = decideDistanceAnnouncement({ distanceToManeuverM: 680, roadClass: 'primary', speedMPS: 10, announcedKeys: announced });
+  assertEqual(backNear, null, '680mへ戻っても700mは再発話しない（announcedKeysのまま）');
+});
+
+test('voiceScheduler: 20mから開始した場合、update()を複数回呼んでも「まもなく」以外は一切発話されない', () => {
+  const scheduler = createVoiceScheduler();
+  const base = { maneuverSignature: '0', roadClass: 'primary', roadName: 'テスト道路', maneuver: { type: 'turn', modifier: 'right' }, smartLanePhrase: null, smartLaneConfidence: null };
+  const first = scheduler.update({ ...base, distanceToManeuverM: 20, speedMPS: 0 });
+  assertEqual(typeof first === 'string' && first.length > 0, true, '最初の1回は発話する（まもなく）');
+  [80, 250, 400, 650, 700].forEach((d) => {
+    const r = scheduler.update({ ...base, distanceToManeuverM: d, speedMPS: 0 });
+    assertEqual(r, null, `距離${d}mへ変化しても追加の発話が発生しない`);
+  });
+});
+
+// ---------- SmartLaneに正しい道路の車線情報を渡す ----------
+test('pickTargetRoad: targetRoad=nextのときはnextRoadを返す', () => {
+  const currentRoad = { name: '現在道路', lanes: [{ isActive: true }] };
+  const nextRoad = { name: '次の道路', lanes: [{ isActive: true }, { isActive: false }, { isActive: true }] };
+  const r = pickTargetRoad({ targetRoad: 'next' }, currentRoad, nextRoad);
+  assertEqual(r, nextRoad, 'nextRoadそのものが返る');
+});
+
+test('pickTargetRoad: targetRoad=currentのときはcurrentRoadを返す', () => {
+  const currentRoad = { name: '現在道路', lanes: [{ isActive: true }] };
+  const nextRoad = { name: '次の道路', lanes: [{ isActive: true }, { isActive: false }] };
+  const r = pickTargetRoad({ targetRoad: 'current' }, currentRoad, nextRoad);
+  assertEqual(r, currentRoad, 'currentRoadそのものが返る');
+});
+
+test('SmartLane専用パネル: targetRoad=nextのとき、現在道路(3車線)ではなく次の道路(5車線)の車線図が使われる', () => {
+  const currentRoad = { lanes: [{ isValid: true, isActive: true }, { isValid: true, isActive: false }, { isValid: true, isActive: false }] };
+  const nextRoad = {
+    lanes: [
+      { isValid: true, isActive: false }, { isValid: true, isActive: false }, { isValid: true, isActive: true },
+      { isValid: true, isActive: true }, { isValid: true, isActive: false }
+    ]
+  };
+  const advice = { targetRoad: 'next', confidence: 'high', phrase: '右側車線がおすすめです', recommendedLanes: [2, 3] };
+  const targetRoad = pickTargetRoad(advice, currentRoad, nextRoad);
+  const guide = renderSmartLaneGuide(advice, targetRoad.lanes);
+  const laneCountInHtml = (guide.lanesHtml.match(/class="lane/g) || []).length;
+  assertEqual(laneCountInHtml, 5, '次の道路の車線数(5)が車線図に反映される（現在道路の3ではない）');
+});
+
+// ---------- 案内パネルに次に入る道路名を表示する ----------
+test('resolveUpcomingRoadName: 次の道路が分かる場合は次の道路名を返す', () => {
+  const r = resolveUpcomingRoadName({ name: '現在道路' }, { name: '次の道路' });
+  assertEqual(r, '次の道路', '次の道路名が優先される');
+});
+test('resolveUpcomingRoadName: 次の道路が不明な場合は現在道路名にフォールバックする', () => {
+  const r = resolveUpcomingRoadName({ name: '現在道路' }, null);
+  assertEqual(r, '現在道路', '現在道路名にフォールバック');
+});
+test('formatUpcomingRoadLabel: 次の道路が分かる場合は「次：」を付けて表示する', () => {
+  const r = formatUpcomingRoadLabel({ name: '現在道路' }, { name: '県道4号' });
+  assertEqual(r, '次：県道4号', '「次：」表示');
+});
+test('formatUpcomingRoadLabel: 次の道路が不明な場合は「次：」を付けず現在道路名をそのまま表示する', () => {
+  const r = formatUpcomingRoadLabel({ name: '現在道路' }, null);
+  assertEqual(r, '現在道路', '「次：」を付けない');
+});
+test('音声案内と画面表示が同じ道路名を参照する（resolveUpcomingRoadNameが両方の元になっている）', () => {
+  const currentRoad = { name: '現在道路' };
+  const nextRoad = { name: '国道283号' };
+  const voiceRoadName = resolveUpcomingRoadName(currentRoad, nextRoad);
+  const panelLabel = formatUpcomingRoadLabel(currentRoad, nextRoad);
+  assertEqual(panelLabel, `次：${voiceRoadName}`, '画面表示は音声で使う道路名と同じ文字列を含む');
+
+  const voiceText = composeAnnouncementText({ thresholdKey: '300', distanceM: 300, roadName: voiceRoadName, maneuver: { type: 'turn', modifier: 'right' }, smartLanePhrase: null, smartLaneConfidence: null });
+  assertEqual(voiceText.includes(nextRoad.name), true, '音声案内文にも同じ道路名が含まれる');
+});
+
+// ---------- 実走画面を見やすくする（ナビパネル） ----------
+test('navigationPanel: phase=idleのときは方向アイコンを一切表示しない（直進矢印も出さない）', () => {
+  renderNavigationPanel({ phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null, smartLane: null, eta: '—', remainingTime: '', remainingDistance: '' });
+  assertEqual(document.getElementById('navIcon').innerHTML, '', 'アイコンが空であること');
+});
+test('navigationPanel: phase=idleのときguidebarにcompactクラスが付く', () => {
+  renderNavigationPanel({ phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null, smartLane: null, eta: '—', remainingTime: '', remainingDistance: '' });
+  assertEqual(document.getElementById('guidebar').classList.contains('compact'), true, 'ナビ未開始時はcompact');
+});
+test('navigationPanel: phase=guidingかつバナー非表示のときはcompactが付かない', () => {
+  hideStatusBanner();
+  renderNavigationPanel({ phase: 'guiding', maneuver: { type: 'turn', modifier: 'left' }, distanceToManeuverText: '300 m', roadName: 'テスト道路', smartLane: null, eta: '10:00', remainingTime: '5分', remainingDistance: '1 km' });
+  assertEqual(document.getElementById('guidebar').classList.contains('compact'), false, '案内中はcompactではない');
+});
+test('navigationPanel: 案内中でもバナー表示中はcompactになる（GPSエラー等で情報過多にならないよう）', () => {
+  renderNavigationPanel({ phase: 'guiding', maneuver: { type: 'turn', modifier: 'left' }, distanceToManeuverText: '300 m', roadName: 'テスト道路', smartLane: null, eta: '10:00', remainingTime: '5分', remainingDistance: '1 km' });
+  showStatusBanner('GPS精度が低下しています。安全な場所で端末の位置情報設定を確認してください');
+  assertEqual(document.getElementById('guidebar').classList.contains('compact'), true, 'バナー表示中はcompact');
+  hideStatusBanner();
+  renderNavigationPanel({ phase: 'guiding', maneuver: { type: 'turn', modifier: 'left' }, distanceToManeuverText: '300 m', roadName: 'テスト道路', smartLane: null, eta: '10:00', remainingTime: '5分', remainingDistance: '1 km' });
+  assertEqual(document.getElementById('guidebar').classList.contains('compact'), false, 'バナーを消せば通常表示に戻る');
+});
+
+// ---------- 利用者向けエラー表示 ----------
+test('describeMapError: 技術的な例外文ではなく日本語の案内文を返す', () => {
+  const r = describeMapError();
+  assertEqual(typeof r === 'string' && r.length > 0, true, '文字列を返す');
+  assertEqual(/[a-zA-Z]{10,}/.test(r), false, '英語の技術的なエラー文らしき長い英字列を含まない');
+});
+test('describeGpsAccuracyDegraded: 対応方法が分かる日本語文言を返す', () => {
+  const r = describeGpsAccuracyDegraded();
+  assertEqual(r, 'GPS精度が低下しています。安全な場所で端末の位置情報設定を確認してください', '指定文言と一致する');
 });
 
 // ---------- 実行 ----------

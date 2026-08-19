@@ -24,9 +24,10 @@
 </head>
 <body>
 
-<div id="app">
+<div id="app" class="hide-debug">
 
   <!-- 地図は常に全画面。他のUIはこの上に浮かせる（フローティングUI） -->
+  <!-- DEBUGパネルは実走の妨げにならないよう初期状態で非表示。DEBUGボタンを押した時だけ表示する。 -->
   <div id="map"></div>
 
   <!-- 上部バー（浮かせる） -->
@@ -40,7 +41,7 @@
     <button id="btnStart" class="toggle" aria-pressed="false">ナビ開始</button>
     <button id="btnRecenter" class="toggle" title="現在地に戻る" aria-label="現在地に戻る">現在地</button>
     <button id="btn3d" class="toggle" aria-pressed="true">3D</button>
-    <button id="btnDebug" class="toggle active" aria-pressed="true">DEBUG</button>
+    <button id="btnDebug" class="toggle" aria-pressed="false">DEBUG</button>
     <select id="testRouteId" title="テストルート">
       <option value="other">ルート未選択</option>
       <option value="kitakami_city">北上市内</option>

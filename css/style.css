@@ -169,6 +169,16 @@ html, body {
   color: #ffffff;
 }
 
+/* ナビ未開始時・案内バナー表示中は、車線表示や残り距離などの副次情報を隠し、
+   パネル自体を小さくする（実走中の主要情報を最優先で大きく見せるため）。 */
+#guidebar.compact #navSummaryRow,
+#guidebar.compact .nav-lanes {
+  display: none;
+}
+#guidebar.compact {
+  padding: 10px 14px;
+}
+
 #navStatusBanner {
   background: #b34700;
   color: #fff;
@@ -257,4 +267,20 @@ html, body {
 /* 縦画面のときはデバッグパネルを画面幅に合わせて狭くする */
 @media (orientation: portrait) {
   #debugPanel { width: min(220px, calc(100vw - 20px)); }
+}
+
+/* AIBOX・iPhone横画面の低い高さ（例：844×390程度）でも地図が十分見えるよう、
+   ナビパネル・DEBUGパネルの文字サイズと余白を切り詰める。タップ領域(44px)は変えない。 */
+@media (orientation: landscape) and (max-height: 430px) {
+  #guidebar { padding: 8px 12px; bottom: calc(env(safe-area-inset-bottom) + 6px); }
+  #navMainRow { gap: 10px; }
+  .nav-icon { width: 34px; height: 34px; }
+  .nav-distance { font-size: 22px; }
+  .nav-road-name { font-size: 14px; }
+  .nav-smartlane-text { font-size: 12px; margin-top: 2px; }
+  .nav-lanes:not(:empty) { margin-top: 4px; }
+  .nav-lanes .lane { font-size: 13px; min-width: 24px; padding: 4px 6px; }
+  #navSummaryRow { font-size: 13px; gap: 10px; margin-top: 6px; padding-top: 6px; }
+  /* 実測：この幅でのガイド中(SmartLane表示あり)の#guidebar高さは約155px。余裕を持たせる。 */
+  #debugPanel { top: calc(env(safe-area-inset-top) + 50px); bottom: calc(env(safe-area-inset-bottom) + 175px); }
 }

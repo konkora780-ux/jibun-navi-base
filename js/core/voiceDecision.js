@@ -20,8 +20,18 @@ function isHighway(roadClass) {
 }
 
 /**
+ * しきい値は「距離がそこまで縮まった瞬間に一度だけ発話する」もの。
+ * 逆戻り（古い段階が後から流れる）を防ぐため、今回の距離ですでに満たしている
+ * （＝通過済みの）しきい値が複数あっても、一番近い（数値が一番小さい）ものだけを
+ * 発話し、それより遠い段階は `consumedKeys` として「発話せず済み扱い」にする。
+ * 呼び出し側（nav/voiceScheduler.js）は consumedKeys も announcedKeys に加えることで、
+ * 以後その段階が二度と（距離が遠ざかっても）鳴らないようにする。
+ *
+ * 例：25mから開始 → 「まもなく」だけ発話し、700/300/100は無音で消費する。
+ * 例：250mから開始 → 300のみ発話し、700は無音で消費する（700は言わない）。
+ *
  * @param {{distanceToManeuverM:number, roadClass:string, speedMPS:number|null, announcedKeys:Set<string>}} state
- * @returns {{key:string, distanceM:number} | null} 新たに案内すべき距離段階。無ければnull
+ * @returns {{key:string, distanceM:number, consumedKeys:string[]} | null} 新たに案内すべき距離段階。無ければnull
  */
 export function decideDistanceAnnouncement({ distanceToManeuverM, roadClass, speedMPS, announcedKeys }) {
   if (!Number.isFinite(distanceToManeuverM) || distanceToManeuverM < 0) return null;
@@ -30,18 +40,22 @@ export function decideDistanceAnnouncement({ distanceToManeuverM, roadClass, spe
   const speed = Number.isFinite(speedMPS) && speedMPS > 0 ? speedMPS : 0;
   const immediateDistanceM = Math.max(IMMEDIATE_MIN_METERS, speed * IMMEDIATE_SECONDS);
 
+  // 現時点の距離で満たしている（＝すでに通過している）が、まだ発話していないしきい値。
+  const satisfiedThresholdKeys = thresholds
+    .filter((t) => distanceToManeuverM <= t && !announcedKeys.has(String(t)))
+    .map((t) => String(t));
+
   // 「直前」を最優先でチェック（一番近い、最も重要な案内のため）。
   if (distanceToManeuverM <= immediateDistanceM && !announcedKeys.has('immediate')) {
-    return { key: 'immediate', distanceM: distanceToManeuverM };
+    return { key: 'immediate', distanceM: distanceToManeuverM, consumedKeys: satisfiedThresholdKeys };
   }
 
-  // 遠い方から順に、まだ案内しておらず、既に距離を下回っている最初の段階を返す。
-  for (const t of thresholds) {
-    if (distanceToManeuverM <= t && !announcedKeys.has(String(t))) {
-      return { key: String(t), distanceM: t };
-    }
-  }
-  return null;
+  if (satisfiedThresholdKeys.length === 0) return null;
+
+  const chosenKey = satisfiedThresholdKeys.reduce((min, k) => (Number(k) < Number(min) ? k : min));
+  const consumedKeys = satisfiedThresholdKeys.filter((k) => k !== chosenKey);
+
+  return { key: chosenKey, distanceM: Number(chosenKey), consumedKeys };
 }
 
 /**

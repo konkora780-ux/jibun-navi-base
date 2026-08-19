@@ -30,13 +30,16 @@ import { createApiRetryPolicy } from './nav/apiRetryPolicy.js';
 import { renderDestResultItem } from './ui/destResultsView.js';
 import { renderNavigationPanel, showStatusBanner, hideStatusBanner } from './ui/navigationPanel.js';
 import { renderSmartLaneGuide } from './ui/smartLaneGuide.js';
-import { createSmartLaneInput } from './core/models.js';
+import { createSmartLaneInput, pickTargetRoad } from './core/models.js';
 import { evaluateSmartLane } from './core/smartLane.js';
 import { compareRecommendation } from './core/compare.js';
 import { describeManeuver } from './core/phrase.js';
-import { formatDistance, formatDuration, formatETA } from './core/formatNavigation.js';
 import {
-  describeGeolocationError, describeNetworkStatus, describeRouteFetchFailure
+  formatDistance, formatDuration, formatETA, resolveUpcomingRoadName, formatUpcomingRoadLabel
+} from './core/formatNavigation.js';
+import {
+  describeGeolocationError, describeNetworkStatus, describeRouteFetchFailure,
+  describeMapError, describeGpsAccuracyDegraded
 } from './core/connectivityMessages.js';
 import { renderDebugPanel } from './ui/debugPanel.js';
 import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
@@ -301,7 +304,7 @@ function processNavUpdate(pos) {
   input.distanceToCurrent = trackResult.distanceToCurrentManeuver;
 
   const advice = evaluateSmartLane(input);
-  const targetRoadSnapshot = advice.targetRoad === 'next' ? input.nextRoad : input.currentRoad;
+  const targetRoadSnapshot = pickTargetRoad(advice, input.currentRoad, input.nextRoad);
   const mapboxRecommendedLanes = activeIndicesOf(targetRoadSnapshot);
   const recommendationMatched = compareRecommendation(mapboxRecommendedLanes, advice.recommendedLanes);
   const missingFields = collectMissingFields(input);
@@ -364,12 +367,20 @@ function processNavUpdate(pos) {
   }
 
   // ---------- 実走用ナビパネル＋標準の右左折音声案内（Phase2A） ----------
-  const smartLaneGuide = renderSmartLaneGuide(advice, input.currentRoad.lanes);
+  // SmartLaneが「次の道路」向けの推奨をしている場合は、次の道路の車線データを渡す
+  // （現在道路の車線図をそのまま出すと、推奨と車線数・形状が食い違って見えるため）。
+  const smartLaneGuide = renderSmartLaneGuide(advice, targetRoadSnapshot?.lanes ?? null);
+
+  // 画面表示・音声案内とも、同じresolveUpcomingRoadName()を元にする
+  // （これから入る道路名を優先し、分からない場合だけ現在の道路名にフォールバック）。
+  const upcomingRoadName = resolveUpcomingRoadName(input.currentRoad, input.nextRoad);
+  const displayRoadName = formatUpcomingRoadLabel(input.currentRoad, input.nextRoad);
+
   renderNavigationPanel({
     phase: 'guiding',
     maneuver: input.currentManeuver,
     distanceToManeuverText: formatDistance(trackResult.distanceToCurrentManeuver),
-    roadName: input.currentRoad.name,
+    roadName: displayRoadName,
     smartLane: smartLaneGuide,
     eta: formatETA(Date.now(), remainingSeconds),
     remainingTime: formatDuration(remainingSeconds),
@@ -381,7 +392,7 @@ function processNavUpdate(pos) {
     distanceToManeuverM: trackResult.distanceToCurrentManeuver,
     roadClass: input.currentRoad.roadClass,
     speedMPS: pos.speed,
-    roadName: input.nextRoad?.name ?? null,
+    roadName: upcomingRoadName,
     maneuver: input.currentManeuver,
     smartLanePhrase: advice.phrase,
     smartLaneConfidence: advice.confidence
@@ -471,8 +482,15 @@ function onPositionUpdate(pos) {
     setStatus('地図+GPS OK（Step 2完了）');
   }
 
-  // 位置情報が正常に取れているので、GPS関連のバナーは消す（オフライン表示中なら維持する）。
-  if (navigator.onLine) hideStatusBanner();
+  // 位置情報自体は取得できているが、精度が悪い場合は利用者に分かる形で伝える
+  // （オフライン表示中はそちらを優先し、上書きしない）。
+  if (navigator.onLine) {
+    if (pos.accuracy != null && pos.accuracy > GPS_ACCURACY.DEGRADED) {
+      showStatusBanner(describeGpsAccuracyDegraded());
+    } else {
+      hideStatusBanner();
+    }
+  }
 
   processNavUpdate(pos);
 }
@@ -494,7 +512,9 @@ map.on('load', () => {
 });
 
 map.on('error', (e) => {
+  // 技術的な例外文はDEBUG欄だけに出し、利用者向けの案内バナーには出さない。
   setStatus('地図エラー：' + (e.error?.message ?? '不明'), true);
+  showStatusBanner(describeMapError());
 });
 
 window.addEventListener('beforeunload', () => {
@@ -602,7 +622,10 @@ async function startNav() {
 
 // ナビを終える際の共通後始末（手動停止・到着の両方から呼ばれる）。
 // 「案内を止める」処理を一箇所にまとめ、片方だけ更新し忘れる事故を防ぐ。
-function resetNavState() {
+// cancelVoice: 読み上げ中の音声も止めるか。手動停止では止めるが、到着時は
+// 直前にspeak()した「目的地周辺です」の案内を消してしまわないようfalseで呼ぶ。
+function resetNavState({ cancelVoice = true } = {}) {
+  if (cancelVoice) cancelSpeech();
   navSession.stop();
   navActive = false;
   btnStart.classList.remove('active');
@@ -643,7 +666,7 @@ function handleArrival() {
     phase: 'arrived', maneuver: null, distanceToManeuverText: '', roadName: null,
     smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
   });
-  resetNavState();
+  resetNavState({ cancelVoice: false });
   hideStatusBanner();
 }
 

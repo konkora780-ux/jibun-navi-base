@@ -39,3 +39,20 @@ export function describeRouteFetchFailure(retryStatus) {
   }
   return '通信エラーが発生しました。しばらくしてから再度お試しください';
 }
+
+/**
+ * 地図の読み込み・通信エラー用。技術的な例外文（e.error.message等）はそのまま
+ * 利用者に見せず、この文言に置き換える（詳細はDEBUGパネル側にだけ出す）。
+ * @returns {string}
+ */
+export function describeMapError() {
+  return '地図の読み込みでエラーが発生しました。しばらくしてから再度お試しください';
+}
+
+/**
+ * GPS精度が設定のしきい値より悪いときに表示する案内。
+ * @returns {string}
+ */
+export function describeGpsAccuracyDegraded() {
+  return 'GPS精度が低下しています。安全な場所で端末の位置情報設定を確認してください';
+}

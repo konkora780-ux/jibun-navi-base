@@ -58,6 +58,9 @@ export function createVoiceScheduler() {
       if (!decision) return null;
 
       announcedKeys.add(decision.key);
+      // 通過済みだが発話しなかった段階も「発話済み扱い」にする。
+      // これをしないと、距離が遠ざかったときに古い段階が後から流れてしまう。
+      (decision.consumedKeys ?? []).forEach((k) => announcedKeys.add(k));
 
       const text = composeAnnouncementText({
         thresholdKey: decision.key,
