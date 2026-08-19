@@ -28,7 +28,8 @@ import { createArrivalTracker } from './nav/arrivalTracker.js';
 import { createVoiceScheduler } from './nav/voiceScheduler.js';
 import { createApiRetryPolicy } from './nav/apiRetryPolicy.js';
 import { renderDestResultItem } from './ui/destResultsView.js';
-import { renderNavigationPanel, showStatusBanner, hideStatusBanner } from './ui/navigationPanel.js';
+import { renderNavigationPanel } from './ui/navigationPanel.js';
+import { setBannerState, clearBannerState } from './ui/statusBannerController.js';
 import { renderSmartLaneGuide } from './ui/smartLaneGuide.js';
 import { createSmartLaneInput, pickTargetRoad } from './core/models.js';
 import { evaluateSmartLane } from './core/smartLane.js';
@@ -39,13 +40,15 @@ import {
 } from './core/formatNavigation.js';
 import {
   describeGeolocationError, describeNetworkStatus, describeRouteFetchFailure,
-  describeMapError, describeGpsAccuracyDegraded
+  describeMapError, describeGpsAccuracyDegraded, describeRequestTimeout,
+  describeSearchNoResults, describeSearchFailure, describeWakeLockUnavailable
 } from './core/connectivityMessages.js';
 import { renderDebugPanel } from './ui/debugPanel.js';
 import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
 import {
   recordDestinationUse, getHistory, toggleFavorite, isFavorite, getFavorites, excludeFavorites
 } from './log/destinationHistory.js';
+import { formatDestinationLabel, isDestinationSelectionValid } from './core/destinationSelection.js';
 
 const dbg = {
   status: document.getElementById('dbgStatus'),
@@ -61,12 +64,15 @@ function setStatus(text, isError = false) {
 
 // トークン未設定を早期に検知する。理由：地図が真っ白になる原因の大半がこれで、
 // 原因が分からないまま時間を溶かしやすいためです。
+// 技術的な例外文はDEBUG欄だけに出し、利用者向けバナーには分かりやすい文言を出す。
 if (!MAPBOX_TOKEN || MAPBOX_TOKEN.startsWith('pk.ここに')) {
   setStatus('トークン未設定：js/config.js を編集してください', true);
+  setBannerState('map-error', '地図の設定が完了していません。設定内容を確認してください');
   throw new Error('MAPBOX_TOKEN is not set');
 }
 if (MAPBOX_TOKEN.startsWith('sk.')) {
   setStatus('危険：sk.トークンは使用禁止です', true);
+  setBannerState('map-error', '地図の設定が完了していません。設定内容を確認してください');
   throw new Error('secret token must not be used in a web app');
 }
 
@@ -165,14 +171,37 @@ function hideDestResults() {
   destResults.innerHTML = '';
 }
 
+// ---------- 目的地検索まわりの折りたたみ ----------
+// 地図の邪魔にならないよう既定で折りたたみ、押したときだけ展開する。
+// ナビが始まったら自動的にまた折りたたむ（startNavのonSuccess参照）。
+const btnToggleSearch = document.getElementById('btnToggleSearch');
+const destSearchGroup = document.getElementById('destSearchGroup');
+
+function setSearchExpanded(expanded) {
+  destSearchGroup.classList.toggle('hidden', !expanded);
+  btnToggleSearch.classList.toggle('active', expanded);
+  btnToggleSearch.setAttribute('aria-pressed', String(expanded));
+  if (!expanded) hideDestResults();
+}
+
+btnToggleSearch.addEventListener('click', () => {
+  const expanding = destSearchGroup.classList.contains('hidden');
+  setSearchExpanded(expanding);
+  if (expanding) destInput.focus();
+});
+
 let destinationMarker = null;
 
 function selectDestination(r) {
   selectedDestination = r;
-  destInput.value = `${r.name}（${r.address}）`;
+  destInput.value = formatDestinationLabel(r);
   setStatus(`目的地を設定: ${r.name}`);
   hideDestResults();
   recordDestinationUse(r);
+  // 「目的地未設定」が原因だったナビ開始不可バナー・検索失敗バナーは、
+  // 目的地が決まった時点で解除する。
+  clearBannerState('nav-guard');
+  clearBannerState('search-failure');
 
   if (!destinationMarker) destinationMarker = createDestinationMarker(map);
   destinationMarker.update([r.lon, r.lat]);
@@ -181,6 +210,17 @@ function selectDestination(r) {
   // 仕組みでMAP_FOLLOW.RESUME_AFTER_SECONDS秒後に自動的に自車位置へ戻る。
   pauseFollow();
   map.easeTo({ center: [r.lon, r.lat], zoom: Math.min(map.getZoom(), 14), duration: 600 });
+}
+
+// 入力欄が選択時の文字列と食い違ったら（利用者が手入力で書き換えた等）選択を解除する。
+// 画面表示と違う目的地へナビが始まってしまう事故を防ぐ（優先度A対応）。
+function clearSelectedDestinationIfMismatched() {
+  if (!selectedDestination) return;
+  if (isDestinationSelectionValid(destInput.value, selectedDestination)) return;
+
+  selectedDestination = null;
+  if (destinationMarker) destinationMarker.remove();
+  setStatus('目的地の選択が解除されました。候補から選び直してください', true);
 }
 
 let lastShownResults = [];
@@ -216,11 +256,21 @@ function handleToggleFavorite(destination) {
   }
 }
 
-btnSearch.addEventListener('click', async () => {
-  const query = destInput.value.trim();
-  if (!query) return;
+// 検索ボタン・Enterキーどちらから呼ばれても同じ経路を通す（二重送信防止も一箇所で行う）。
+let searchInFlight = false;
 
+async function performSearch() {
+  const query = destInput.value.trim();
+  if (!query) {
+    // 空欄での検索は行わず、お気に入り・履歴を候補として出す。
+    showHistoryOrFavoritesIfInputEmpty();
+    return;
+  }
+  if (searchInFlight) return; // 連打・Enter連打での二重送信を防ぐ
+
+  searchInFlight = true;
   btnSearch.disabled = true;
+  setBannerState('search-loading', '検索中…');
   try {
     const results = await searchDestination({
       query,
@@ -230,14 +280,29 @@ btnSearch.addEventListener('click', async () => {
     if (results.length === 0) {
       setStatus('検索結果が見つかりません', true);
       hideDestResults();
+      setBannerState('search-failure', describeSearchNoResults());
       return;
     }
     showDestResults(results);
     setStatus(`候補${results.length}件から目的地を選んでください`);
+    clearBannerState('search-failure');
   } catch (err) {
     setStatus(`検索エラー: ${err.message}`, true);
+    setBannerState('search-failure', err.isTimeout ? describeRequestTimeout() : describeSearchFailure());
   } finally {
+    // 検索の成否にかかわらず、ボタンは必ず再操作できる状態へ戻す。
     btnSearch.disabled = false;
+    searchInFlight = false;
+    clearBannerState('search-loading');
+  }
+}
+
+btnSearch.addEventListener('click', performSearch);
+// 目的地入力欄でEnterを押したら検索を開始する。
+destInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    performSearch();
   }
 });
 
@@ -281,8 +346,13 @@ function showHistoryOrFavoritesIfInputEmpty() {
   if (combined.length > 0) showDestResults(combined);
 }
 
-// 入力し直したら古い候補一覧は消す（空になった場合はお気に入り/履歴を表示し直す）
+// 入力し直したら古い候補一覧は消す（空になった場合はお気に入り/履歴を表示し直す）。
+// 手入力で書き換えられた場合は選択済みの目的地を解除する（selectDestination自身が
+// destInput.value を書き換えてもinputイベントは発火しないため、ここでは常に
+// 「利用者が実際に編集した」場合だけを扱える）。
 destInput.addEventListener('input', () => {
+  clearSelectedDestinationIfMismatched();
+  clearBannerState('search-failure'); // 新しく入力し直したので古い検索失敗表示は消す
   hideDestResults();
   showHistoryOrFavoritesIfInputEmpty();
 });
@@ -482,11 +552,12 @@ function processNavUpdate(pos) {
   if (!rerouting && rerouter.shouldReroute(trackResult.isOffRoute, now) && selectedDestination) {
     const retryCheck = rerouteRetryPolicy.canRetry(now);
     if (!retryCheck.ok) {
-      showStatusBanner(describeRouteFetchFailure(retryCheck));
+      setBannerState('route-fetch-failure', describeRouteFetchFailure(retryCheck));
     } else {
       rerouting = true;
       rerouteRetryPolicy.recordAttempt(now);
       setStatus('ルートから外れました。再検索中…');
+      setBannerState('route-loading', 'ルートから外れました。再検索中…');
       fetchRoute({ origin: { lat: pos.lat, lon: pos.lon }, destination: selectedDestination, token: MAPBOX_TOKEN })
         .then((route) => {
           currentRoute = route;
@@ -497,11 +568,16 @@ function processNavUpdate(pos) {
           drawRoute(map, route.geometry);
           setStatus('再ルートしました');
           rerouteRetryPolicy.reset();
-          hideStatusBanner();
+          clearBannerState('route-loading');
+          clearBannerState('route-fetch-failure');
         })
         .catch((err) => {
           setStatus(`再ルートエラー: ${err.message}`, true);
-          showStatusBanner(describeRouteFetchFailure(rerouteRetryPolicy.canRetry(Date.now())));
+          clearBannerState('route-loading');
+          const message = err.isTimeout
+            ? describeRequestTimeout()
+            : describeRouteFetchFailure(rerouteRetryPolicy.canRetry(Date.now()));
+          setBannerState('route-fetch-failure', message);
         })
         .finally(() => { rerouting = false; });
     }
@@ -513,6 +589,11 @@ let firstFixReceived = false;
 function onPositionUpdate(pos) {
   lastPosition = pos;
   updateGpsDebug(pos);
+
+  // 位置情報を取得できているので「GPS取得エラー」状態は解除する。
+  // オフライン等の他の警告があれば、優先度に従ってそちらが引き続き表示される
+  // （statusBannerControllerが優先順位を見て自動的に選ぶため、ここで気にしなくてよい）。
+  clearBannerState('gps-error');
 
   if (!userMarker) userMarker = createUserMarker(map);
   userMarker.update([pos.lon, pos.lat], pos.heading);
@@ -526,14 +607,11 @@ function onPositionUpdate(pos) {
     setStatus('地図+GPS OK（Step 2完了）');
   }
 
-  // 位置情報自体は取得できているが、精度が悪い場合は利用者に分かる形で伝える
-  // （オフライン表示中はそちらを優先し、上書きしない）。
-  if (navigator.onLine) {
-    if (pos.accuracy != null && pos.accuracy > GPS_ACCURACY.DEGRADED) {
-      showStatusBanner(describeGpsAccuracyDegraded());
-    } else {
-      hideStatusBanner();
-    }
+  // 位置情報自体は取得できているが、精度が悪い場合は利用者に分かる形で伝える。
+  if (pos.accuracy != null && pos.accuracy > GPS_ACCURACY.DEGRADED) {
+    setBannerState('gps-accuracy', describeGpsAccuracyDegraded());
+  } else {
+    clearBannerState('gps-accuracy');
   }
 
   processNavUpdate(pos);
@@ -541,9 +619,7 @@ function onPositionUpdate(pos) {
 
 function onPositionError(err) {
   setStatus(`GPSエラー：${err.message ?? '取得できません'}`, true);
-  // 通信バナーが既にオフライン表示中なら、GPSエラーで上書きしない
-  // （利用者にとって「まず通信を確認する」方が優先度が高いため）。
-  if (navigator.onLine) showStatusBanner(describeGeolocationError(err));
+  setBannerState('gps-error', describeGeolocationError(err));
 }
 
 // ---------- 地図の読み込み完了後に開始 ----------
@@ -558,7 +634,7 @@ map.on('load', () => {
 map.on('error', (e) => {
   // 技術的な例外文はDEBUG欄だけに出し、利用者向けの案内バナーには出さない。
   setStatus('地図エラー：' + (e.error?.message ?? '不明'), true);
-  showStatusBanner(describeMapError());
+  setBannerState('map-error', describeMapError());
 });
 
 window.addEventListener('beforeunload', () => {
@@ -581,9 +657,9 @@ renderNavigationPanel({
 function updateConnectivityBanner() {
   const message = describeNetworkStatus(navigator.onLine);
   if (message) {
-    showStatusBanner(message);
+    setBannerState('offline', message);
   } else {
-    hideStatusBanner();
+    clearBannerState('offline');
   }
 }
 window.addEventListener('online', updateConnectivityBanner);
@@ -591,17 +667,27 @@ window.addEventListener('offline', updateConnectivityBanner);
 updateConnectivityBanner();
 
 async function acquireWakeLock() {
-  wakeLockSentinel = await requestWakeLock();
-  if (wakeLockSentinel) {
+  const result = await requestWakeLock();
+  if (result.ok) {
+    wakeLockSentinel = result.sentinel;
     wakeLockSentinel.addEventListener('release', () => {
       wakeLockSentinel = null;
     });
+    clearBannerState('wake-lock');
+  } else {
+    // 未対応・取得失敗のどちらでもナビ自体は止めない。画面が消える可能性があることだけ伝える。
+    wakeLockSentinel = null;
+    setBannerState('wake-lock', describeWakeLockUnavailable());
   }
 }
 
 const navSession = createNavSession({ fetchRouteFn: fetchRoute });
 
 async function startNav() {
+  // 最終安全確認：入力欄の文字列が選択済み目的地と食い違っていないか、
+  // ナビ開始の直前にもう一度検証する（優先度A対応。二重チェックで事故を防ぐ）。
+  clearSelectedDestinationIfMismatched();
+
   // iOS Safari対策：unlockSpeech()はクリックハンドラ内でawaitより前に同期的に呼ぶ
   unlockSpeech();
 
@@ -612,7 +698,7 @@ async function startNav() {
         // ルート取得中は連打で複数回fetchが走らないようボタンを無効化する
         // （navSession自体も二重起動を防ぐが、UI上も分かりやすく無効化する）。
         btnStart.disabled = true;
-        showStatusBanner('ルート取得中…');
+        setBannerState('route-loading', 'ルート取得中…');
       },
       onSuccess: async (route) => {
         currentRoute = route;
@@ -628,7 +714,11 @@ async function startNav() {
         btnStart.classList.add('active');
         btnStart.setAttribute('aria-pressed', 'true');
         btnStart.textContent = 'ナビ終了';
-        hideStatusBanner();
+        // ナビが始まったら目的地検索まわりを自動的にたたみ、地図の邪魔にならないようにする。
+        setSearchExpanded(false);
+        clearBannerState('route-loading');
+        clearBannerState('route-fetch-failure');
+        clearBannerState('nav-guard');
         speak('ナビを開始します');
 
         // 成功時だけWake Lockを取得する。
@@ -649,7 +739,8 @@ async function startNav() {
           smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
         });
         setStatus(`ルート取得エラー: ${err.message}`, true);
-        showStatusBanner(describeRouteFetchFailure({ ok: false }));
+        clearBannerState('route-loading');
+        setBannerState('route-fetch-failure', err.isTimeout ? describeRequestTimeout() : describeRouteFetchFailure({ ok: false }));
         speak('ルートを取得できませんでした');
       }
     }
@@ -657,8 +748,10 @@ async function startNav() {
 
   // ガード判定（目的地/現在地未取得）で開始できなかった場合のみ、ここでメッセージを出す。
   // ルート取得失敗の場合はonFailureで既に表示済みなので重複させない。
+  // DEBUG欄だけでなく利用者向けバナーにも理由を表示する（優先度A対応）。
   if (result.phase === 'guard') {
     setStatus(result.reason, true);
+    setBannerState('nav-guard', result.reason);
   }
 
   btnStart.disabled = false;
@@ -686,6 +779,12 @@ function resetNavState({ cancelVoice = true } = {}) {
   voiceScheduler.stop();
   rerouteRetryPolicy.reset();
 
+  // ナビの状態にひもづくバナーだけを消す。GPS精度/オフライン/地図エラー/
+  // 画面消灯防止の警告は、ナビが終了しても状況自体は続いている場合があるため触らない。
+  clearBannerState('route-loading');
+  clearBannerState('route-fetch-failure');
+  clearBannerState('nav-guard');
+
   if (wakeLockSentinel) {
     wakeLockSentinel.release();
     wakeLockSentinel = null;
@@ -698,7 +797,6 @@ function stopNav() {
     phase: 'idle', maneuver: null, distanceToManeuverText: '', roadName: null,
     smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
   });
-  hideStatusBanner();
 }
 
 // 目的地到着時の後始末（3-4）。手動停止(stopNav)と違い、到着メッセージを
@@ -711,7 +809,6 @@ function handleArrival() {
     smartLane: null, eta: '—', remainingTime: '', remainingDistance: ''
   });
   resetNavState({ cancelVoice: false });
-  hideStatusBanner();
 }
 
 btnStart.addEventListener('click', () => {

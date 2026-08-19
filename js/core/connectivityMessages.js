@@ -56,3 +56,36 @@ export function describeMapError() {
 export function describeGpsAccuracyDegraded() {
   return 'GPS精度が低下しています。安全な場所で端末の位置情報設定を確認してください';
 }
+
+/**
+ * Directions API・Search Box APIがタイムアウトしたときの案内。
+ * 通常の通信エラーとは区別して呼び出すこと（呼び出し側でerr.isTimeoutを確認する）。
+ * @returns {string}
+ */
+export function describeRequestTimeout() {
+  return '通信に時間がかかっています。電波状況を確認して、もう一度お試しください';
+}
+
+/**
+ * 目的地検索で候補が0件だったときの案内。
+ * @returns {string}
+ */
+export function describeSearchNoResults() {
+  return '該当する候補が見つかりませんでした。別のキーワードでお試しください';
+}
+
+/**
+ * 目的地検索がタイムアウト以外の理由で失敗したときの案内。
+ * @returns {string}
+ */
+export function describeSearchFailure() {
+  return '検索に失敗しました。しばらくしてから再度お試しください';
+}
+
+/**
+ * 画面消灯防止（Wake Lock）が使えない/取得に失敗したときの案内。ナビ自体は止めない。
+ * @returns {string}
+ */
+export function describeWakeLockUnavailable() {
+  return '画面消灯防止を使用できません。走行前に端末の自動ロック設定を確認してください';
+}

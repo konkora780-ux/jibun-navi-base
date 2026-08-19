@@ -10,10 +10,10 @@
  */
 export function canStartNav({ destination, position }) {
   if (!destination) {
-    return { ok: false, reason: '目的地を検索してから「ナビ開始」を押してください' };
+    return { ok: false, reason: '先に目的地を検索し、候補から選んでください' };
   }
   if (!position) {
-    return { ok: false, reason: '現在地を取得できていません。少し待ってから試してください' };
+    return { ok: false, reason: '現在地を確認しています。位置情報を許可して、少しお待ちください' };
   }
   return { ok: true };
 }

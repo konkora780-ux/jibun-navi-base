@@ -73,6 +73,13 @@ export function createDestinationMarker(map) {
         marker.addTo(map);
         added = true;
       }
+    },
+    // 目的地の選択が解除された（入力欄が書き換えられた等）ときに呼ぶ。
+    remove() {
+      if (added) {
+        marker.remove();
+        added = false;
+      }
     }
   };
 }

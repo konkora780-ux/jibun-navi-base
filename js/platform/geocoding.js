@@ -7,14 +7,15 @@
  * （実際に「北上駅」で検索すると「北上市」しか返らなかった）。
  * 実機検証で確認済み：Search Box APIの/forwardエンドポイントならPOI名で正しく検索できる。
  */
+import { fetchWithTimeout } from './fetchWithTimeout.js';
 
 const SEARCH_BOX_BASE = 'https://api.mapbox.com/search/searchbox/v1/forward';
 
 /**
- * @param {{query:string, token:string, proximity?:{lat:number,lon:number}}} args
+ * @param {{query:string, token:string, proximity?:{lat:number,lon:number}, timeoutMs?:number}} args
  * @returns {Promise<Array<{name:string, address:string, lat:number, lon:number}>>}
  */
-export async function searchDestination({ query, token, proximity = null }) {
+export async function searchDestination({ query, token, proximity = null, timeoutMs }) {
   const params = new URLSearchParams({
     q: query,
     language: 'ja',
@@ -24,7 +25,7 @@ export async function searchDestination({ query, token, proximity = null }) {
   });
   if (proximity) params.set('proximity', `${proximity.lon},${proximity.lat}`);
 
-  const res = await fetch(`${SEARCH_BOX_BASE}?${params.toString()}`);
+  const res = await fetchWithTimeout(`${SEARCH_BOX_BASE}?${params.toString()}`, timeoutMs);
   if (!res.ok) {
     throw new Error(`目的地検索エラー: HTTP ${res.status}`);
   }

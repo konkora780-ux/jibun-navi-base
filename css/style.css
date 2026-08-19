@@ -61,6 +61,18 @@ html, body {
 #destWrap { position: relative; flex: 1 1 auto; min-width: 80px; }
 #destInput { width: 100%; }
 
+/* 目的地検索まわりは既定で折りたたみ（#destSearchGroupに.hiddenが付く）。
+   展開時は#topbarの2行目として全幅を使い、中の要素を折り返して並べる。 */
+#destSearchGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  flex: 1 1 100%;
+}
+/* IDセレクタはクラスセレクタより詳細度が高く.hiddenが打ち消されてしまうため、明示的に上書きする */
+#destSearchGroup.hidden { display: none; }
+
 .hidden { display: none; }
 
 #destResults {

@@ -60,8 +60,15 @@ import { renderNavigationPanel, showStatusBanner, hideStatusBanner } from '../js
 import { renderSmartLaneGuide } from '../js/ui/smartLaneGuide.js';
 import { pickTargetRoad } from '../js/core/models.js';
 import { resolveUpcomingRoadName, formatUpcomingRoadLabel } from '../js/core/formatNavigation.js';
-import { describeMapError, describeGpsAccuracyDegraded } from '../js/core/connectivityMessages.js';
+import {
+  describeMapError, describeGpsAccuracyDegraded, describeRequestTimeout,
+  describeSearchNoResults, describeSearchFailure, describeWakeLockUnavailable
+} from '../js/core/connectivityMessages.js';
 import { mergeIntoHistory, toggleInFavorites, excludeFavorites } from '../js/log/destinationHistory.js';
+import { formatDestinationLabel, isDestinationSelectionValid } from '../js/core/destinationSelection.js';
+import { pickHighestPriorityMessage, BANNER_PRIORITY_ORDER } from '../js/core/bannerPriority.js';
+import { setBannerState, clearBannerState, resetBannerStates, getActiveBannerStates } from '../js/ui/statusBannerController.js';
+import { fetchWithTimeout } from '../js/platform/fetchWithTimeout.js';
 
 const cases = [];
 function test(description, fn) {
@@ -554,6 +561,76 @@ test('navigationProgress: route.distance/durationが不正な場合はnullを返
   assertEqual(r.remainingSeconds, null, 'durationがNaNならnull');
 });
 
+// ---------- 優先度C: 到着予定時刻の精度を上げる（step単位の残り時間計算） ----------
+test('navigationProgress: 速度の異なる複数stepで、ルート全体比率ではなくstep単位の按分で残り時間を計算する', () => {
+  const progress = createNavigationProgress();
+  const route = {
+    distance: 1700, duration: 240,
+    steps: [
+      { distance: 1000, duration: 100 }, // 速い区間（例：高速）
+      { distance: 500, duration: 100 },  // 遅い区間
+      { distance: 200, duration: 40 }
+    ]
+  };
+  // step0の半分（残り500m）まで進んだ状態
+  const r = progress.update(route, { progressDistance: 500, stepIndex: 0, distanceToCurrentManeuver: 500 });
+  // 期待値：現在step(100 * 500/1000=50) + 後続step(100+40) = 190
+  assertEqual(r.remainingSeconds, 190, 'step単位の按分で計算される');
+  // ルート全体比率の従来計算(240 * 1200/1700 ≈ 169.4)とは異なる値になっていることを確認
+  assertEqual(Math.abs(r.remainingSeconds - 240 * (1200 / 1700)) > 1, true, 'ルート全体比率の簡易計算とは異なる（step単位が使われている証拠）');
+});
+test('navigationProgress: ルート途中でstepが切り替わっても正しく残り時間を計算する', () => {
+  const progress = createNavigationProgress();
+  const route = {
+    distance: 1700, duration: 240,
+    steps: [
+      { distance: 1000, duration: 100 },
+      { distance: 500, duration: 100 },
+      { distance: 200, duration: 40 }
+    ]
+  };
+  progress.update(route, { progressDistance: 800, stepIndex: 0, distanceToCurrentManeuver: 200 });
+  const r = progress.update(route, { progressDistance: 1200, stepIndex: 1, distanceToCurrentManeuver: 300 });
+  // step1の残り300/500 * 100 = 60 + step2(40) = 100
+  assertEqual(r.remainingSeconds, 100, 'stepが切り替わった後も正しく計算される');
+});
+test('navigationProgress: 不正なstepデータ（distance/durationが数値でない）でも例外にならず安全な値を返す', () => {
+  const progress = createNavigationProgress();
+  const routeBadCurrent = { distance: 300, duration: 60, steps: [{ distance: 'abc', duration: 100 }] };
+  let r1;
+  try {
+    r1 = progress.update(routeBadCurrent, { progressDistance: 0, stepIndex: 0, distanceToCurrentManeuver: 0 });
+  } catch (e) {
+    r1 = { threw: true };
+  }
+  assertEqual(r1.threw, undefined, '現在stepのdistanceが不正でも例外にならない');
+  assertEqual(Number.isFinite(r1.remainingSeconds) || r1.remainingSeconds === null, true, '数値かnullのいずれか（フォールバック計算）');
+
+  const progress2 = createNavigationProgress();
+  const routeBadNext = {
+    distance: 300, duration: 60,
+    steps: [{ distance: 100, duration: 20 }, { distance: 200, duration: null }]
+  };
+  let r2;
+  try {
+    r2 = progress2.update(routeBadNext, { progressDistance: 50, stepIndex: 0, distanceToCurrentManeuver: 50 });
+  } catch (e) {
+    r2 = { threw: true };
+  }
+  assertEqual(r2.threw, undefined, '後続stepのdurationが不正でも例外にならない');
+});
+test('navigationProgress: 再ルート後（reset()後）は古い残り時間を引き継がない', () => {
+  const progress = createNavigationProgress();
+  const routeA = { distance: 100, duration: 10, steps: [{ distance: 100, duration: 10 }] };
+  const rA = progress.update(routeA, { progressDistance: 90, stepIndex: 0, distanceToCurrentManeuver: 10 });
+  assertEqual(rA.remainingSeconds, 1, '旧ルートでは残りわずか（10 * 10/100 = 1秒）');
+
+  progress.reset();
+  const routeB = { distance: 5000, duration: 600, steps: [{ distance: 5000, duration: 600 }] };
+  const rB = progress.update(routeB, { progressDistance: 0, stepIndex: 0, distanceToCurrentManeuver: 5000 });
+  assertEqual(rB.remainingSeconds, 600, '新ルートの値がそのまま使われ、旧ルートの小さい値に引きずられない');
+});
+
 // ---------- apiRetryPolicy（再試行回数の上限） ----------
 test('apiRetryPolicy: MAX_ATTEMPTS回までは再試行を許可する', () => {
   const policy = createApiRetryPolicy({ MAX_ATTEMPTS: 3, INTERVAL_SECONDS: 5 });
@@ -922,6 +999,222 @@ test('renderDestResultItem: 施設名にHTML文字列が含まれても星ボタ
   sandbox.appendChild(li);
   assertEqual(sandbox.querySelectorAll('img').length, 0, 'imgタグが実体化していないこと');
   assertEqual(window.__xssFired3, undefined, 'onerrorが発火していないこと');
+});
+
+// ==================== 安全性・使いやすさ改善（優先度A/B/C） ====================
+
+// ---------- 優先度A-1: 目的地の食い違いを防ぐ ----------
+test('formatDestinationLabel: name/addressから「名前（住所）」形式の文字列を作る', () => {
+  assertEqual(formatDestinationLabel({ name: '北上駅', address: '岩手県北上市' }), '北上駅（岩手県北上市）', '形式');
+});
+test('formatDestinationLabel: destinationがnullなら空文字を返す', () => {
+  assertEqual(formatDestinationLabel(null), '', '空文字');
+});
+test('isDestinationSelectionValid: 入力欄がformatDestinationLabelと完全一致すれば有効', () => {
+  const dest = { name: '北上駅', address: '岩手県北上市' };
+  assertEqual(isDestinationSelectionValid(formatDestinationLabel(dest), dest), true, '一致');
+});
+test('isDestinationSelectionValid: selectedDestinationが無ければ常にfalse（未選択扱い）', () => {
+  assertEqual(isDestinationSelectionValid('北上駅（岩手県北上市）', null), false, 'null');
+});
+test('目的地Aを選んだあと入力欄を手入力で変更すると選択は無効になる（食い違い防止）', () => {
+  const destA = { name: '目的地A', address: '住所A' };
+  const inputAfterSelectA = formatDestinationLabel(destA);
+  assertEqual(isDestinationSelectionValid(inputAfterSelectA, destA), true, '選択直後は有効');
+
+  const inputAfterManualEdit = '目的地B'; // 利用者が候補を選ばず手入力で書き換えた
+  assertEqual(isDestinationSelectionValid(inputAfterManualEdit, destA), false, '手入力後は無効＝ナビ開始できない');
+});
+test('入力欄を変更しただけ（候補を選び直していない）状態では、以前の目的地へのナビ開始は成立しない', () => {
+  const destA = { name: '目的地A', address: '住所A' };
+  // destBという文字列に書き換えたが、destBを候補として選んではいない（selectedDestinationはdestAのまま）
+  const currentInputValue = '目的地B（住所B）';
+  assertEqual(isDestinationSelectionValid(currentInputValue, destA), false, 'destAへは開始できない');
+});
+test('履歴から選んだ場合は入力欄と選択が一致し、正常にナビ開始できる', () => {
+  const fromHistory = { name: '北上駅', address: '岩手県北上市', lat: 39.29, lon: 141.11, lastUsedAt: '2026-01-01T00:00:00.000Z' };
+  const inputValue = formatDestinationLabel(fromHistory);
+  assertEqual(isDestinationSelectionValid(inputValue, fromHistory), true, '履歴由来でも一致すれば有効');
+});
+test('お気に入りから選んだ場合も入力欄と選択が一致し、正常にナビ開始できる', () => {
+  const fromFavorite = { name: '花巻空港', address: '岩手県花巻市', lat: 39.42, lon: 141.13 };
+  const inputValue = formatDestinationLabel(fromFavorite);
+  assertEqual(isDestinationSelectionValid(inputValue, fromFavorite), true, 'お気に入り由来でも一致すれば有効');
+});
+
+// ---------- 優先度A-2: 案内バナーの状態を一元管理する ----------
+test('pickHighestPriorityMessage: 複数の状態があるとき優先順位の先頭のものを返す', () => {
+  const states = new Map([['gps-accuracy', 'GPS精度低下'], ['map-error', '地図エラー'], ['offline', 'オフライン']]);
+  assertEqual(pickHighestPriorityMessage(states), '地図エラー', 'map-errorが最優先');
+});
+test('pickHighestPriorityMessage: 該当する状態が無ければnullを返す', () => {
+  assertEqual(pickHighestPriorityMessage(new Map()), null, 'null');
+});
+test('BANNER_PRIORITY_ORDER: map-errorが最優先、route-loadingが最も低い', () => {
+  assertEqual(BANNER_PRIORITY_ORDER[0], 'map-error', '先頭');
+  assertEqual(BANNER_PRIORITY_ORDER[BANNER_PRIORITY_ORDER.length - 1], 'search-loading', '末尾');
+});
+
+function bannerText() {
+  return document.getElementById('navStatusBanner').textContent;
+}
+function bannerHidden() {
+  return document.getElementById('navStatusBanner').classList.contains('hidden');
+}
+
+test('statusBannerController: 地図エラー中に正常なGPS状態（gps-accuracy解除）が来ても地図エラーは消えない', () => {
+  resetBannerStates();
+  setBannerState('map-error', '地図の読み込みでエラーが発生しました');
+  clearBannerState('gps-accuracy'); // 正常なGPS更新に相当（何もsetしない/念のためclearする）
+  assertEqual(bannerText(), '地図の読み込みでエラーが発生しました', '地図エラーが表示され続ける');
+});
+test('statusBannerController: オフライン中に正常なGPS状態が来てもオフライン表示が消えない', () => {
+  resetBannerStates();
+  setBannerState('offline', 'オフラインです');
+  setBannerState('gps-accuracy', 'GPS精度が低下しています');
+  clearBannerState('gps-accuracy'); // GPS精度が回復した相当
+  assertEqual(bannerText(), 'オフラインです', 'オフライン表示が優先され続ける');
+});
+test('statusBannerController: GPS精度警告が解除されたとき、GPS精度の警告だけが消え他の状態は残る', () => {
+  resetBannerStates();
+  setBannerState('gps-accuracy', 'GPS精度が低下しています');
+  setBannerState('wake-lock', '画面消灯防止を使用できません');
+  clearBannerState('gps-accuracy');
+  assertEqual(bannerText(), '画面消灯防止を使用できません', 'gps-accuracyより低い優先度のwake-lockが表示される');
+  assertEqual(getActiveBannerStates().has('gps-accuracy'), false, 'gps-accuracyは削除されている');
+  assertEqual(getActiveBannerStates().has('wake-lock'), true, 'wake-lockは残っている');
+});
+test('statusBannerController: ルート取得中の表示は位置更新（GPS精度クリア）だけでは消えない', () => {
+  resetBannerStates();
+  setBannerState('route-loading', 'ルート取得中…');
+  clearBannerState('gps-accuracy'); // 位置更新のたびに呼ばれる処理に相当
+  assertEqual(bannerText(), 'ルート取得中…', 'ルート取得中の表示が消えない');
+});
+test('statusBannerController: ルート取得成功後は取得中表示が消える', () => {
+  resetBannerStates();
+  setBannerState('route-loading', 'ルート取得中…');
+  clearBannerState('route-loading');
+  assertEqual(bannerHidden(), true, 'バナーが非表示に戻る');
+});
+test('statusBannerController: 複数警告がある場合は最も優先度の高いものを表示し、解除すると次に高いものが出る', () => {
+  resetBannerStates();
+  setBannerState('gps-accuracy', 'A: GPS精度低下');
+  setBannerState('offline', 'B: オフライン');
+  setBannerState('map-error', 'C: 地図エラー');
+  assertEqual(bannerText(), 'C: 地図エラー', '最優先のmap-errorが表示される');
+  clearBannerState('map-error');
+  assertEqual(bannerText(), 'B: オフライン', '次に優先度の高いofflineが表示される');
+  clearBannerState('offline');
+  assertEqual(bannerText(), 'A: GPS精度低下', '最後に残ったgps-accuracyが表示される');
+  clearBannerState('gps-accuracy');
+  assertEqual(bannerHidden(), true, '全て解除されると非表示に戻る');
+});
+resetBannerStates(); // 後続のnavigationPanelテスト等に影響しないよう最後にクリアしておく
+
+// ---------- 優先度A-3: ナビを開始できない理由を画面に表示する ----------
+test('canStartNav: 目的地未設定の文言は「先に目的地を検索し、候補から選んでください」', () => {
+  const r = canStartNav({ destination: null, position: { lat: 1, lon: 1 } });
+  assertEqual(r.reason, '先に目的地を検索し、候補から選んでください', '文言');
+});
+test('canStartNav: 現在地未取得の文言は「現在地を確認しています。位置情報を許可して、少しお待ちください」', () => {
+  const r = canStartNav({ destination: { lat: 1, lon: 1 }, position: null });
+  assertEqual(r.reason, '現在地を確認しています。位置情報を許可して、少しお待ちください', '文言');
+});
+test('canStartNav: 理由文言に技術的な英語エラー文字列（変数名等）を含まない', () => {
+  const reasons = [
+    canStartNav({ destination: null, position: null }).reason,
+    canStartNav({ destination: { lat: 1, lon: 1 }, position: null }).reason
+  ];
+  reasons.forEach((reason) => {
+    assertEqual(/[a-zA-Z]{4,}/.test(reason), false, `技術的な英字列を含まない: ${reason}`);
+  });
+});
+
+// ---------- 優先度B: 通信にタイムアウトを追加する ----------
+test('fetchWithTimeout: 時間内に成功する', async () => {
+  const originalFetch = window.fetch;
+  window.fetch = async () => ({ ok: true, json: async () => ({ code: 'Ok' }) });
+  try {
+    const res = await fetchWithTimeout('https://example.invalid/test', 200);
+    assertEqual(res.ok, true, '成功する');
+  } finally {
+    window.fetch = originalFetch;
+  }
+});
+
+test('fetchWithTimeout: 応答が無いとタイムアウトで中断され、isTimeout:trueのエラーになる', async () => {
+  const originalFetch = window.fetch;
+  // 実際のfetchと同様、AbortSignalが中断されたらAbortErrorでrejectする擬似実装
+  window.fetch = (url, opts) => new Promise((resolve, reject) => {
+    opts.signal.addEventListener('abort', () => {
+      const err = new Error('The operation was aborted');
+      err.name = 'AbortError';
+      reject(err);
+    });
+    // わざと解決させない
+  });
+  try {
+    let caught = null;
+    try {
+      await fetchWithTimeout('https://example.invalid/test', 30);
+    } catch (err) {
+      caught = err;
+    }
+    assertEqual(caught?.isTimeout, true, 'isTimeoutフラグが立つ');
+  } finally {
+    window.fetch = originalFetch;
+  }
+});
+
+test('navSession: タイムアウトエラーでも通常の失敗と同様にidleへ戻り、onFailureへ伝わる（ボタンを再操作できる状態に戻る）', async () => {
+  const session = createNavSession({
+    fetchRouteFn: async () => {
+      const err = new Error('通信がタイムアウトしました');
+      err.isTimeout = true;
+      throw err;
+    }
+  });
+  let failureErr = null;
+  const r = await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    { onFailure: (err) => { failureErr = err; } }
+  );
+  assertEqual(r.started, false, 'started');
+  assertEqual(session.getState(), 'idle', 'idleに戻る＝ボタンを再操作できる');
+  assertEqual(failureErr?.isTimeout, true, 'isTimeoutが伝わる');
+});
+
+test('navSession: タイムアウトしても自動で再試行はしない（fetchRouteは1回だけ呼ばれる）', async () => {
+  let calls = 0;
+  const session = createNavSession({
+    fetchRouteFn: async () => {
+      calls++;
+      const err = new Error('タイムアウト');
+      err.isTimeout = true;
+      throw err;
+    }
+  });
+  await session.start({ destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' });
+  assertEqual(calls, 1, '1回だけ呼ばれる');
+});
+
+// ---------- 優先度B: 画面消灯防止の状態を表示する ----------
+test('describeWakeLockUnavailable: 対応方法が分かる日本語文言を返す', () => {
+  assertEqual(describeWakeLockUnavailable(), '画面消灯防止を使用できません。走行前に端末の自動ロック設定を確認してください', '文言');
+});
+
+// ---------- 優先度B: 検索操作を分かりやすくする ----------
+test('describeSearchNoResults / describeSearchFailure / describeRequestTimeout: 技術的な英語エラー文字列を含まない', () => {
+  [describeSearchNoResults(), describeSearchFailure(), describeRequestTimeout()].forEach((msg) => {
+    assertEqual(/[a-zA-Z]{4,}/.test(msg), false, `技術的な英字列を含まない: ${msg}`);
+  });
+});
+test('BANNER_PRIORITY_ORDER: search-failureはroute-fetch-failureより低く、nav-guardより高い', () => {
+  const idxRouteFail = BANNER_PRIORITY_ORDER.indexOf('route-fetch-failure');
+  const idxSearchFail = BANNER_PRIORITY_ORDER.indexOf('search-failure');
+  const idxNavGuard = BANNER_PRIORITY_ORDER.indexOf('nav-guard');
+  assertEqual(idxRouteFail < idxSearchFail, true, 'route-fetch-failureの方が優先度が高い');
+  assertEqual(idxSearchFail < idxNavGuard, true, 'search-failureの方がnav-guardより優先度が高い');
 });
 
 // ---------- 実行 ----------

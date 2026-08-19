@@ -13,7 +13,7 @@
 - **テスト環境：iPhone の Safari**（ホーム画面に追加して全画面で使用）
 - **最終環境：Android AIBOX（車載ディスプレイ・横画面）のブラウザ、将来的にWebViewでAPK化**
 - **費用制約：¥0 で運用すること**
-- 現在地点：**Phase 1（Step 1〜11）実装・自動テスト完了。Phase 2（全画面UI・設定画面・音声検索）実装済み。Phase 2A（COCCHi等の他社カーナビを参考にした実走用ナビパネル・到着判定・標準音声案内・SmartLane専用表示・通信/GPS状態表示）実装・自動テスト完了。** 実車での走行確認はこれから。Phase 2B以降は設計のみで未実装（`docs/04_COCCHi比較・今後の改善計画.md`参照、外部APIは何も登録・契約していない）。
+- 現在地点：**Phase 1（Step 1〜11）実装・自動テスト完了。Phase 2（全画面UI・設定画面・音声検索）実装済み。Phase 2A（COCCHi等の他社カーナビを参考にした実走用ナビパネル・到着判定・標準音声案内・SmartLane専用表示・通信/GPS状態表示）実装・自動テスト完了。Phase 2A実走フィードバック対応（音声案内の逆戻り防止・SmartLane車線データ修正等）完了。目的地の検索履歴・お気に入り・検索候補の距離表示実装済み。安全性・使いやすさ改善（目的地の食い違い防止、案内バナーの優先順位付き一元管理、ナビ開始不可理由の表示、通信タイムアウト、画面消灯防止の状態表示、検索UX改善、到着予定時刻の精度向上、目的地検索まわりの折りたたみUI）完了。** 実車での走行確認はこれから。Phase 2B以降（履歴・お気に入り・距離表示以外）は設計のみで未実装（`docs/04_COCCHi比較・今後の改善計画.md`参照、外部APIは何も登録・契約していない）。
 
 同梱ドキュメント（必ず全部読むこと）：
 - `docs/00_調査報告.md` — 技術調査結果。重要な制約が書いてある
@@ -87,37 +87,41 @@ jibun-navi-base/
 │   │   ├─ formatNavigation.js      ← 距離・時間・ETA・道路名ラベルの表示フォーマット（Phase2A）
 │   │   ├─ arrivalJudge.js          ← 到着の瞬間判定（Phase2A）
 │   │   ├─ voiceDecision.js         ← 標準音声案内の発話タイミング・文言（Phase2A。しきい値は一番近いものだけ発話し、通過済みの遠い段階はconsumedKeysで無音消費する）
-│   │   └─ connectivityMessages.js  ← 通信/GPS/地図エラーの日本語メッセージ（Phase2A）
+│   │   ├─ connectivityMessages.js  ← 通信/GPS/地図/検索/画面消灯防止エラーの日本語メッセージ
+│   │   ├─ destinationSelection.js  ← 入力欄の文字列と選択済み目的地が一致しているかの判定（安全性改善）
+│   │   └─ bannerPriority.js        ← 案内バナーの優先順位付け（純粋関数、安全性改善）
 │   ├─ platform/            ← 外部APIに依存する層
-│   │   ├─ directions.js    ← Directions API 呼び出し + 正規化
-│   │   ├─ geocoding.js     ← 目的地検索（Search Box API）
+│   │   ├─ directions.js    ← Directions API 呼び出し + 正規化（fetchWithTimeoutでタイムアウト付き）
+│   │   ├─ geocoding.js     ← 目的地検索（Search Box API、fetchWithTimeoutでタイムアウト付き）
+│   │   ├─ fetchWithTimeout.js ← fetch()にAbortController経由でタイムアウトを付ける共通ヘルパー（既定15秒）
 │   │   ├─ speechInput.js   ← 音声検索（Web Speech API、非対応時はテキスト検索が独立して動く）
-│   │   ├─ location.js      ← Geolocation + Wake Lock
+│   │   ├─ location.js      ← Geolocation + Wake Lock（requestWakeLockは{ok,sentinel|reason}を返す）
 │   │   ├─ mapView.js       ← Mapbox GL JS のラッパ
 │   │   └─ voice.js         ← 音声案内（speak/cancelSpeech）
 │   ├─ nav/                 ← ナビ進行の自前実装（状態管理。DOM非依存）
 │   │   ├─ routeTracker.js  ← 自車位置→ルート上の位置・残距離・現在step
 │   │   ├─ rerouter.js      ← 逸脱検知
 │   │   ├─ navSession.js    ← ナビ開始の状態遷移（idle/loading/active、二重起動防止）
-│   │   ├─ navGuard.js      ← ナビ開始可否の判定
+│   │   ├─ navGuard.js      ← ナビ開始可否の判定（利用者向けの理由文言を返す）
 │   │   ├─ arrivalTracker.js       ← 到着継続時間の管理（Phase2A）
-│   │   ├─ navigationProgress.js   ← 残り距離・残り時間の管理（Phase2A）
+│   │   ├─ navigationProgress.js   ← 残り距離・残り時間の管理（残り時間はstep単位のduration按分で算出）
 │   │   ├─ voiceScheduler.js       ← 音声案内の発話タイミング管理（Phase2A）
 │   │   └─ apiRetryPolicy.js       ← 再ルートAPIの再試行回数制限（Phase2A）
 │   ├─ ui/
 │   │   ├─ debugPanel.js
 │   │   ├─ laneView.js            ← DEBUGパネル用の車線矢印描画
-│   │   ├─ destResultsView.js     ← 検索候補一覧の描画（お気に入り★ボタンはonToggleFavorite指定時のみ表示、後方互換）
+│   │   ├─ destResultsView.js     ← 検索候補一覧の描画（お気に入り★ボタン・距離表示はoptions指定時のみ、後方互換）
 │   │   ├─ navigationPanel.js     ← 実走用ナビ案内パネルの描画（Phase2A）
 │   │   ├─ maneuverIcon.js        ← 自作の方向アイコン（Phase2A、未知の組み合わせはstraightへ安全フォールバック）
-│   │   └─ smartLaneGuide.js      ← 実走用パネルのSmartLane表示（Confidenceごとの表示切替、Phase2A）
+│   │   ├─ smartLaneGuide.js      ← 実走用パネルのSmartLane表示（Confidenceごとの表示切替、Phase2A）
+│   │   └─ statusBannerController.js ← 案内バナーの状態を一元管理（setBannerState/clearBannerStateで優先順位に従って表示、安全性改善）
 │   └─ log/
 │       ├─ driveLog.js             ← 走行ログの記録とエクスポート
 │       └─ destinationHistory.js   ← 目的地の検索履歴・お気に入り（localStorageのみ、外部送信なし）
 ├─ tests/
 │   ├─ fixtures/*.json      ← SmartLaneのテストケース
 │   ├─ smartLane.test.html  ← SmartLane本体のテスト（全20ケース）
-│   └─ appLogic.test.html   ← 設定検証・ナビ状態遷移・XSS安全性・Phase2A（114ケース）
+│   └─ appLogic.test.html   ← 設定検証・ナビ状態遷移・XSS安全性・Phase2A・安全性改善（147ケース）
 └─ README.md
 ```
 

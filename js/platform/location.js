@@ -30,12 +30,18 @@ export function clearWatch(watchId) {
 
 // 画面消灯防止。sentinelはOS側の判断（画面ロック・タブ非表示等）で自動的にreleaseされるため、
 // 呼び出し側（main.js）が 'release' イベントを見て再取得の要否を判断する。
+// 戻り値は「未対応」と「対応しているが取得に失敗」を呼び出し側が区別できる形にする
+// （利用者向けに違う案内を出すため）。
+/**
+ * @returns {Promise<{ok:true, sentinel:object} | {ok:false, reason:'unsupported'|'failed'}>}
+ */
 export async function requestWakeLock() {
-  if (!('wakeLock' in navigator)) return null;
+  if (!('wakeLock' in navigator)) return { ok: false, reason: 'unsupported' };
   try {
-    return await navigator.wakeLock.request('screen');
+    const sentinel = await navigator.wakeLock.request('screen');
+    return { ok: true, sentinel };
   } catch (err) {
     console.warn('WakeLock取得失敗:', err.message);
-    return null;
+    return { ok: false, reason: 'failed' };
   }
 }

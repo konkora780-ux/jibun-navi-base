@@ -16,6 +16,7 @@
  * アプリの6分類（motorway/trunk/primary/secondary/street/unknown）に丸め込む。
  */
 import { createRoadSnapshot, createManeuverInfo } from '../core/models.js';
+import { fetchWithTimeout } from './fetchWithTimeout.js';
 
 const DIRECTIONS_BASE = 'https://api.mapbox.com/directions/v5/mapbox/driving';
 
@@ -101,7 +102,7 @@ function buildEndManeuver(nextStep) {
  *   nextRoad    = steps[i+1].road,     followingManeuver = steps[i+1].endManeuver
  *   distanceToFollowing = steps[i+1].distance
  */
-export async function fetchRoute({ origin, destination, token }) {
+export async function fetchRoute({ origin, destination, token, timeoutMs }) {
   const coords = `${origin.lon},${origin.lat};${destination.lon},${destination.lat}`;
   const params = new URLSearchParams({
     steps: 'true',
@@ -113,7 +114,7 @@ export async function fetchRoute({ origin, destination, token }) {
     access_token: token
   });
 
-  const res = await fetch(`${DIRECTIONS_BASE}/${coords}?${params.toString()}`);
+  const res = await fetchWithTimeout(`${DIRECTIONS_BASE}/${coords}?${params.toString()}`, timeoutMs);
   if (!res.ok) {
     throw new Error(`Directions APIエラー: HTTP ${res.status}`);
   }

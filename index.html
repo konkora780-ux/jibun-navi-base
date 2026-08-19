@@ -31,25 +31,30 @@
   <div id="map"></div>
 
   <!-- 上部バー（浮かせる） -->
+  <!-- 目的地検索まわりは既定で折りたたみ、押したときだけ広げる。
+       ナビ開始後は自動的にまた折りたたみ、地図の邪魔にならないようにする。 -->
   <header id="topbar">
-    <div id="destWrap">
-      <input id="destInput" type="text" placeholder="目的地を検索" aria-label="目的地を検索">
-      <ul id="destResults" class="hidden" role="listbox" aria-label="検索候補"></ul>
+    <button id="btnToggleSearch" class="toggle" title="目的地を検索" aria-label="目的地を検索" aria-pressed="false">🔍 目的地</button>
+    <div id="destSearchGroup" class="hidden">
+      <div id="destWrap">
+        <input id="destInput" type="text" placeholder="目的地を検索" aria-label="目的地を検索">
+        <ul id="destResults" class="hidden" role="listbox" aria-label="検索候補"></ul>
+      </div>
+      <button id="btnSearch">検索</button>
+      <button id="btnVoiceSearch" class="toggle" title="音声で検索" aria-label="音声で検索" aria-pressed="false">🎤</button>
+      <select id="testRouteId" title="テストルート">
+        <option value="other">ルート未選択</option>
+        <option value="kitakami_city">北上市内</option>
+        <option value="kitakami_kamaishi">北上〜釜石</option>
+        <option value="tono_city">遠野市内</option>
+        <option value="tohoku_expressway">東北自動車道</option>
+        <option value="morioka_city">盛岡市内</option>
+      </select>
     </div>
-    <button id="btnSearch">検索</button>
-    <button id="btnVoiceSearch" class="toggle" title="音声で検索" aria-label="音声で検索" aria-pressed="false">🎤</button>
     <button id="btnStart" class="toggle" aria-pressed="false">ナビ開始</button>
     <button id="btnRecenter" class="toggle" title="現在地に戻る" aria-label="現在地に戻る">現在地</button>
     <button id="btn3d" class="toggle" aria-pressed="true">3D</button>
     <button id="btnDebug" class="toggle" aria-pressed="false">DEBUG</button>
-    <select id="testRouteId" title="テストルート">
-      <option value="other">ルート未選択</option>
-      <option value="kitakami_city">北上市内</option>
-      <option value="kitakami_kamaishi">北上〜釜石</option>
-      <option value="tono_city">遠野市内</option>
-      <option value="tohoku_expressway">東北自動車道</option>
-      <option value="morioka_city">盛岡市内</option>
-    </select>
   </header>
 
   <!-- DEBUGパネル（浮かせる） -->
