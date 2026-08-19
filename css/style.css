@@ -82,7 +82,7 @@ html, body {
   cursor: pointer;
 }
 #destResults li:last-child { border-bottom: none; }
-#destResults li:hover, #destResults li:active { background: #21262d; }
+#destResults li:hover, #destResults li:active, #destResults li:focus { background: #21262d; outline: 2px solid #58a6ff; outline-offset: -2px; }
 #destResults .dr-name { color: #e6edf3; font-size: 14px; }
 #destResults .dr-address { color: #8b949e; font-size: 12px; margin-top: 2px; }
 
@@ -93,7 +93,8 @@ html, body {
   border-radius: 6px;
   padding: 8px 12px;
   font-size: 15px;
-  min-height: 40px;   /* 走行中でも押せる大きさ */
+  min-height: 44px;   /* 走行中でも押せる大きさ（タップ領域44px以上を確保） */
+  min-width: 44px;
   cursor: pointer;
 }
 #topbar button:disabled { opacity: .4; }

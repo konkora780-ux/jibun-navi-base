@@ -112,12 +112,88 @@ export const SETTABLE_GROUPS = {
   GPS_ACCURACY, LANE_CHANGE, REROUTE, MAP_FOLLOW, TERRAIN, SMART_LANE_ENABLED_ROAD_CLASSES
 };
 
+// 各設定値の許容範囲。settings.html（保存前チェック）とここ（読み込み時チェック）の
+// 両方で同じスキーマを使う。理由：localStorageは開発者ツール等から直接書き換えられる
+// 可能性があるため、保存側だけでなく読み込み側でも必ず検証する。
+// REROUTE.MIN_INTERVAL_SECONDSは、再ルート（Directions API呼び出し）の最短間隔なので
+// 10未満を絶対に許可しない（課金事故防止）。
+export const SETTINGS_SCHEMA = {
+  GPS_ACCURACY: {
+    GOOD: { type: 'number', min: 1 },
+    DEGRADED: { type: 'number', min: 1 }
+  },
+  LANE_CHANGE: {
+    SECONDS_PER_CHANGE: { type: 'number', min: 0.5 },
+    CRITICAL_RATIO: { type: 'number', min: 0.1, max: 1 }
+  },
+  REROUTE: {
+    OFF_ROUTE_METERS: { type: 'number', min: 5 },
+    OFF_ROUTE_SECONDS: { type: 'number', min: 1 },
+    MIN_INTERVAL_SECONDS: { type: 'number', min: 10 }
+  },
+  MAP_FOLLOW: {
+    ZOOM: { type: 'number', min: 10, max: 20 },
+    PITCH_3D: { type: 'number', min: 0, max: 85 },
+    RESUME_AFTER_SECONDS: { type: 'number', min: 1 }
+  },
+  TERRAIN: {
+    EXAGGERATION: { type: 'number', min: 1, max: 3 }
+  },
+  SMART_LANE_ENABLED_ROAD_CLASSES: {
+    motorway: { type: 'boolean' },
+    trunk: { type: 'boolean' },
+    primary: { type: 'boolean' },
+    secondary: { type: 'boolean' },
+    street: { type: 'boolean' },
+    unknown: { type: 'boolean' }
+  }
+};
+
+/**
+ * @param {string} group
+ * @param {string} key
+ * @param {unknown} rawValue
+ * @returns {{valid:true, value:number|boolean} | {valid:false, error:string}}
+ */
+export function validateSettingValue(group, key, rawValue) {
+  const rule = SETTINGS_SCHEMA[group]?.[key];
+  if (!rule) return { valid: false, error: `未知の設定項目です（${group}.${key}）` };
+
+  if (rule.type === 'boolean') {
+    if (typeof rawValue !== 'boolean') return { valid: false, error: 'true/falseである必要があります' };
+    return { valid: true, value: rawValue };
+  }
+
+  if (rawValue === '' || rawValue === null || rawValue === undefined) {
+    return { valid: false, error: '未入力です' };
+  }
+  const num = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+  if (!Number.isFinite(num)) {
+    return { valid: false, error: '有効な数値ではありません' };
+  }
+  if (rule.min !== undefined && num < rule.min) {
+    return { valid: false, error: `${rule.min}以上にしてください` };
+  }
+  if (rule.max !== undefined && num > rule.max) {
+    return { valid: false, error: `${rule.max}以下にしてください` };
+  }
+  return { valid: true, value: num };
+}
+
 try {
   const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
   if (raw) {
     const overrides = JSON.parse(raw);
     Object.entries(overrides).forEach(([groupName, values]) => {
-      if (SETTABLE_GROUPS[groupName]) Object.assign(SETTABLE_GROUPS[groupName], values);
+      if (!SETTABLE_GROUPS[groupName] || typeof values !== 'object' || values === null) return;
+      Object.entries(values).forEach(([key, rawValue]) => {
+        const result = validateSettingValue(groupName, key, rawValue);
+        if (result.valid) {
+          SETTABLE_GROUPS[groupName][key] = result.value;
+        } else {
+          console.warn(`設定値が不正なため無視しました（${groupName}.${key}）: ${result.error}`);
+        }
+      });
     });
   }
 } catch (err) {

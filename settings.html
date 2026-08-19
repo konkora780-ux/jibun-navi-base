@@ -17,11 +17,13 @@
     border-radius:6px; padding:6px 8px; font-size:14px; text-align:right;
   }
   input[type="checkbox"] { width:20px; height:20px; }
+  input.invalid { border-color:#f85149; background:#3a1a1a; }
   #actions { display:flex; gap:8px; margin-top:24px; flex-wrap:wrap; }
-  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:10px 14px; font-size:14px; cursor:pointer; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:10px 14px; font-size:14px; cursor:pointer; min-height:44px; }
   #btnSave { background:#1f6feb; border-color:#1f6feb; }
   #note { margin-top:16px; padding:10px; background:#161b22; border:1px solid #30363d; border-radius:8px; font-size:13px; color:#d29922; }
   #savedMsg { color:#3fb950; font-size:13px; margin-top:10px; display:none; }
+  #errorMsg { color:#f85149; font-size:13px; margin-top:10px; display:none; white-space:pre-wrap; }
 </style>
 </head>
 <body>
@@ -35,14 +37,18 @@
   <button id="btnSave">保存する</button>
   <button id="btnReset">初期値に戻す</button>
 </div>
-<div id="savedMsg">保存しました。ナビ画面（index.html）を再読み込みすると反映されます。</div>
+<div id="savedMsg" role="status">保存しました。ナビ画面（index.html）を再読み込みすると反映されます。</div>
+<div id="errorMsg" role="alert"></div>
 
 <div id="note">
   ⚠ 「再ルートの最短間隔」は10秒未満にしないでください。短くしすぎるとMapbox APIの呼び出しが増えすぎて、思わぬ課金が発生する恐れがあります。
 </div>
 
 <script type="module">
-import { SETTABLE_GROUPS, SETTINGS_STORAGE_KEY, ROAD_CLASSES } from './js/config.js';
+import { SETTABLE_GROUPS, SETTINGS_STORAGE_KEY, ROAD_CLASSES, validateSettingValue } from './js/config.js';
+
+// group.key → 日本語ラベル（エラーメッセージ表示用）
+const FIELD_LABELS = {};
 
 const ROAD_CLASS_LABEL = {
   motorway: '高速道路', trunk: '幹線道路', primary: '主要道路',
@@ -111,6 +117,7 @@ FIELD_GROUPS.forEach(({ title, desc, group, fields }) => {
   form.appendChild(p);
 
   fields.forEach(({ key, label, unit, step, min, max }) => {
+    FIELD_LABELS[`${group}.${key}`] = label;
     const row = document.createElement('div');
     row.className = 'field';
     const value = SETTABLE_GROUPS[group][key];
@@ -133,6 +140,7 @@ p.textContent = '実走結果の取得率が低い道路種別はOFFにすると
 form.appendChild(p);
 
 ROAD_CLASSES.forEach((rc) => {
+  FIELD_LABELS[`SMART_LANE_ENABLED_ROAD_CLASSES.${rc}`] = ROAD_CLASS_LABEL[rc] ?? rc;
   const row = document.createElement('div');
   row.className = 'field';
   const checked = SETTABLE_GROUPS.SMART_LANE_ENABLED_ROAD_CLASSES[rc];
@@ -143,21 +151,57 @@ ROAD_CLASSES.forEach((rc) => {
   form.appendChild(row);
 });
 
-function collectValues() {
-  const overrides = {};
+// 各inputの現在値（生の文字列/boolean）を集める。数値変換はvalidateSettingValue側で行う
+// （Number('')は0になってしまい未入力を検出できないため、ここでは変換しない）。
+function collectRawValues() {
+  const raw = {};
   form.querySelectorAll('input').forEach((input) => {
     const { group, key, bool } = input.dataset;
-    if (!overrides[group]) overrides[group] = {};
-    overrides[group][key] = bool ? input.checked : Number(input.value);
+    if (!raw[group]) raw[group] = {};
+    raw[group][key] = bool ? input.checked : input.value;
   });
-  return overrides;
+  return raw;
 }
 
+// 全項目を検証する。1件でも不正なら保存させない（部分保存はしない）。
+function validateAll(rawValues) {
+  const validated = {};
+  const errors = [];
+  form.querySelectorAll('input.invalid').forEach((el) => el.classList.remove('invalid'));
+
+  Object.entries(rawValues).forEach(([group, values]) => {
+    validated[group] = {};
+    Object.entries(values).forEach(([key, rawValue]) => {
+      const result = validateSettingValue(group, key, rawValue);
+      const inputEl = form.querySelector(`input[data-group="${group}"][data-key="${key}"]`);
+      if (result.valid) {
+        validated[group][key] = result.value;
+      } else {
+        errors.push(`${FIELD_LABELS[`${group}.${key}`] ?? `${group}.${key}`}：${result.error}`);
+        inputEl?.classList.add('invalid');
+      }
+    });
+  });
+  return { validated, errors };
+}
+
+const errorMsgEl = document.getElementById('errorMsg');
+const savedMsgEl = document.getElementById('savedMsg');
+
 document.getElementById('btnSave').addEventListener('click', () => {
-  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(collectValues()));
-  const msg = document.getElementById('savedMsg');
-  msg.style.display = 'block';
-  setTimeout(() => { msg.style.display = 'none'; }, 4000);
+  const { validated, errors } = validateAll(collectRawValues());
+
+  if (errors.length > 0) {
+    savedMsgEl.style.display = 'none';
+    errorMsgEl.textContent = '保存できませんでした。以下を直してください：\n' + errors.join('\n');
+    errorMsgEl.style.display = 'block';
+    return;
+  }
+
+  errorMsgEl.style.display = 'none';
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(validated));
+  savedMsgEl.style.display = 'block';
+  setTimeout(() => { savedMsgEl.style.display = 'none'; }, 4000);
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {

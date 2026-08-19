@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>アプリロジック テスト（設定検証・ナビ開始ガード・検索結果のXSS安全性）</title>
+<style>
+  body { background:#0d1117; color:#e6edf3; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; padding:20px; }
+  h1 { font-size:18px; }
+  #summary { font-size:16px; margin:12px 0; padding:10px; border-radius:6px; }
+  #summary.pass { background:#1a3a1a; color:#3fb950; }
+  #summary.fail { background:#3a1a1a; color:#f85149; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid #30363d; padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#161b22; }
+  tr.pass td.result { color:#3fb950; }
+  tr.fail td.result { color:#f85149; font-weight:bold; }
+  td.detail { white-space:pre-wrap; font-family:monospace; font-size:12px; color:#8b949e; }
+  #sandbox { display:none; }
+</style>
+</head>
+<body>
+
+<h1>アプリロジック テスト</h1>
+<div id="summary">実行中…</div>
+<table id="resultTable">
+  <thead><tr><th>#</th><th>内容</th><th>結果</th><th>詳細</th></tr></thead>
+  <tbody id="resultBody"></tbody>
+</table>
+
+<!-- renderDestResultItemのテスト用に実際にDOMへ挿入する非表示コンテナ -->
+<ul id="sandbox"></ul>
+
+<script type="module">
+import { validateSettingValue } from '../js/config.js';
+import { canStartNav } from '../js/nav/navGuard.js';
+import { renderDestResultItem } from '../js/ui/destResultsView.js';
+
+const cases = [];
+function test(description, fn) {
+  cases.push({ description, fn });
+}
+
+// ---------- validateSettingValue ----------
+test('GPS_ACCURACY.GOOD=20（正常値）は保存される', () => {
+  const r = validateSettingValue('GPS_ACCURACY', 'GOOD', '20');
+  assertEqual(r.valid, true, 'valid');
+  assertEqual(r.value, 20, 'value');
+});
+
+test('REROUTE.MIN_INTERVAL_SECONDS=9（10秒未満）は保存されない', () => {
+  const r = validateSettingValue('REROUTE', 'MIN_INTERVAL_SECONDS', '9');
+  assertEqual(r.valid, false, 'valid');
+});
+
+test('REROUTE.MIN_INTERVAL_SECONDS=10（境界値）は保存される', () => {
+  const r = validateSettingValue('REROUTE', 'MIN_INTERVAL_SECONDS', '10');
+  assertEqual(r.valid, true, 'valid');
+});
+
+test('空欄は保存されない', () => {
+  const r = validateSettingValue('GPS_ACCURACY', 'GOOD', '');
+  assertEqual(r.valid, false, 'valid');
+});
+
+test('NaN(数値でない文字列)は保存されない', () => {
+  const r = validateSettingValue('GPS_ACCURACY', 'GOOD', 'abc');
+  assertEqual(r.valid, false, 'valid');
+});
+
+test('Infinityは保存されない', () => {
+  const r = validateSettingValue('GPS_ACCURACY', 'GOOD', Infinity);
+  assertEqual(r.valid, false, 'valid');
+});
+
+test('範囲外の値（LANE_CHANGE.CRITICAL_RATIO=1.5、max=1超）は保存されない', () => {
+  const r = validateSettingValue('LANE_CHANGE', 'CRITICAL_RATIO', '1.5');
+  assertEqual(r.valid, false, 'valid');
+});
+
+test('チェックボックス項目にtrue/false以外を渡すと保存されない', () => {
+  const r = validateSettingValue('SMART_LANE_ENABLED_ROAD_CLASSES', 'motorway', 'true');
+  assertEqual(r.valid, false, 'valid（文字列"true"はbooleanではない）');
+});
+
+test('チェックボックス項目にboolean falseを渡すと保存される', () => {
+  const r = validateSettingValue('SMART_LANE_ENABLED_ROAD_CLASSES', 'motorway', false);
+  assertEqual(r.valid, true, 'valid');
+  assertEqual(r.value, false, 'value');
+});
+
+test('未知のグループ/キーは保存されない', () => {
+  const r = validateSettingValue('NOT_A_GROUP', 'X', '1');
+  assertEqual(r.valid, false, 'valid');
+});
+
+// ---------- canStartNav ----------
+test('目的地未設定ではナビ開始できない', () => {
+  const r = canStartNav({ destination: null, position: { lat: 1, lon: 1 } });
+  assertEqual(r.ok, false, 'ok');
+});
+
+test('現在地未取得ではナビ開始できない', () => {
+  const r = canStartNav({ destination: { lat: 1, lon: 1 }, position: null });
+  assertEqual(r.ok, false, 'ok');
+});
+
+test('目的地・現在地とも揃っていればナビ開始できる', () => {
+  const r = canStartNav({ destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 } });
+  assertEqual(r.ok, true, 'ok');
+});
+
+// ---------- renderDestResultItem（XSS安全性） ----------
+test('検索結果の施設名にHTML文字列が含まれてもHTMLとして解釈されない', () => {
+  const malicious = { name: '<img src=x onerror="window.__xssFired = true">', address: '<script>window.__xssFired2 = true<\/script>' };
+  const sandbox = document.getElementById('sandbox');
+  sandbox.innerHTML = '';
+  const li = renderDestResultItem(malicious, () => {});
+  sandbox.appendChild(li);
+
+  assertEqual(sandbox.querySelectorAll('img').length, 0, 'imgタグが実体化していないこと');
+  assertEqual(sandbox.querySelectorAll('script').length, 0, 'scriptタグが実体化していないこと');
+  assertEqual(window.__xssFired, undefined, 'onerrorが発火していないこと');
+  const nameEl = li.querySelector('.dr-name');
+  assertEqual(nameEl.textContent, malicious.name, '文字列としてそのまま表示されていること');
+});
+
+test('検索結果はクリックでonSelectが呼ばれる', () => {
+  let selected = null;
+  const result = { name: 'テスト地点', address: 'テスト住所' };
+  const li = renderDestResultItem(result, (r) => { selected = r; });
+  li.click();
+  assertEqual(selected, result, 'onSelectに渡された値');
+});
+
+// ---------- 実行 ----------
+function assertEqual(actual, expected, label) {
+  const pass = JSON.stringify(actual) === JSON.stringify(expected);
+  if (!pass) {
+    throw new Error(`${label}: expected=${JSON.stringify(expected)} actual=${JSON.stringify(actual)}`);
+  }
+}
+
+function run() {
+  const body = document.getElementById('resultBody');
+  let passCount = 0;
+
+  cases.forEach((c, i) => {
+    let pass = true;
+    let detail = 'OK';
+    try {
+      c.fn();
+    } catch (e) {
+      pass = false;
+      detail = e.message;
+    }
+    if (pass) passCount++;
+
+    const tr = document.createElement('tr');
+    tr.className = pass ? 'pass' : 'fail';
+    const cells = [String(i + 1), c.description, pass ? 'PASS' : 'FAIL', detail];
+    cells.forEach((text, idx) => {
+      const td = document.createElement('td');
+      if (idx === 3) td.className = 'detail';
+      if (idx === 2) td.className = 'result';
+      td.textContent = text;
+      tr.appendChild(td);
+    });
+    body.appendChild(tr);
+  });
+
+  const summary = document.getElementById('summary');
+  summary.textContent = `${passCount} / ${cases.length} 件パス`;
+  summary.className = passCount === cases.length ? 'pass' : 'fail';
+}
+
+run();
+</script>
+</body>
+</html>

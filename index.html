@@ -8,16 +8,17 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="apple-touch-icon" href="icon.png">
 <link rel="icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
 <title>じぶんNaviベース - Phase 1</title>
 
 <!--
-  Mapbox GL JS / Turf.js はメジャーバージョン指定で読み込みます。
-  理由：3系の最新パッチが自動で当たり、バージョン番号の書き換えが不要になるためです。
-  本番運用に入るときは、意図しない変更を防ぐため固定バージョンに切り替えてください。
+  Mapbox GL JS / Turf.js はバージョンを固定しています（理由はREADME.md参照）。
+  更新する場合は、地図・3D地形・ルート追跡（Turf.js）が問題なく動くことを
+  確認してから、CSSとJSのバージョン番号を両方揃えて変更してください。
 -->
-<link href="https://unpkg.com/mapbox-gl@3/dist/mapbox-gl.css" rel="stylesheet">
-<script src="https://unpkg.com/mapbox-gl@3/dist/mapbox-gl.js"></script>
-<script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
+<link href="https://unpkg.com/mapbox-gl@3.28.1/dist/mapbox-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/mapbox-gl@3.28.1/dist/mapbox-gl.js"></script>
+<script src="https://unpkg.com/@turf/turf@7.4.0/turf.min.js"></script>
 
 <link href="css/style.css" rel="stylesheet">
 </head>
@@ -31,15 +32,15 @@
   <!-- 上部バー（浮かせる） -->
   <header id="topbar">
     <div id="destWrap">
-      <input id="destInput" type="text" placeholder="目的地を検索">
-      <ul id="destResults" class="hidden"></ul>
+      <input id="destInput" type="text" placeholder="目的地を検索" aria-label="目的地を検索">
+      <ul id="destResults" class="hidden" role="listbox" aria-label="検索候補"></ul>
     </div>
     <button id="btnSearch">検索</button>
-    <button id="btnVoiceSearch" class="toggle" title="音声で検索">🎤</button>
-    <button id="btnStart" class="toggle">ナビ開始</button>
-    <button id="btnRecenter" class="toggle" title="現在地に戻る">現在地</button>
-    <button id="btn3d" class="toggle">3D</button>
-    <button id="btnDebug" class="toggle active">DEBUG</button>
+    <button id="btnVoiceSearch" class="toggle" title="音声で検索" aria-label="音声で検索" aria-pressed="false">🎤</button>
+    <button id="btnStart" class="toggle" aria-pressed="false">ナビ開始</button>
+    <button id="btnRecenter" class="toggle" title="現在地に戻る" aria-label="現在地に戻る" aria-pressed="false">現在地</button>
+    <button id="btn3d" class="toggle" aria-pressed="true">3D</button>
+    <button id="btnDebug" class="toggle active" aria-pressed="true">DEBUG</button>
     <select id="testRouteId" title="テストルート">
       <option value="other">ルート未選択</option>
       <option value="kitakami_city">北上市内</option>

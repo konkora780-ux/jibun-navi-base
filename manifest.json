@@ -1,0 +1,15 @@
+{
+  "name": "じぶんNaviベース",
+  "short_name": "じぶんNavi",
+  "description": "次の次の曲がり角まで考えたおすすめ車線案内を目指す自分専用カーナビ",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon.png", "sizes": "1254x1254", "type": "image/png", "purpose": "any" }
+  ]
+}

@@ -22,6 +22,8 @@ import { searchDestination } from './platform/geocoding.js';
 import { isSpeechInputSupported, startVoiceSearch } from './platform/speechInput.js';
 import { createRouteTracker } from './nav/routeTracker.js';
 import { createRerouter } from './nav/rerouter.js';
+import { canStartNav } from './nav/navGuard.js';
+import { renderDestResultItem } from './ui/destResultsView.js';
 import { createSmartLaneInput } from './core/models.js';
 import { evaluateSmartLane } from './core/smartLane.js';
 import { compareRecommendation } from './core/compare.js';
@@ -70,13 +72,17 @@ btn3d.addEventListener('click', () => {
   is3d = !is3d;
   map.easeTo({ pitch: is3d ? MAP_DEFAULT.pitch : 0, duration: 400 });
   btn3d.classList.toggle('active', is3d);
+  btn3d.setAttribute('aria-pressed', String(is3d));
 });
 
 // ---------- DEBUGパネルの表示切替 ----------
 const btnDebug = document.getElementById('btnDebug');
 btnDebug.addEventListener('click', () => {
-  document.getElementById('app').classList.toggle('hide-debug');
-  btnDebug.classList.toggle('active');
+  const app = document.getElementById('app');
+  app.classList.toggle('hide-debug');
+  const visible = !app.classList.contains('hide-debug');
+  btnDebug.classList.toggle('active', visible);
+  btnDebug.setAttribute('aria-pressed', String(visible));
 });
 
 // ---------- 現在地追従 ----------
@@ -90,6 +96,7 @@ let watchId = null;
 function pauseFollow() {
   isFollowing = false;
   btnRecenter.classList.add('active');
+  btnRecenter.setAttribute('aria-pressed', 'true');
   if (resumeTimer) clearTimeout(resumeTimer);
   resumeTimer = setTimeout(resumeFollow, MAP_FOLLOW.RESUME_AFTER_SECONDS * 1000);
 }
@@ -97,6 +104,7 @@ function pauseFollow() {
 function resumeFollow() {
   isFollowing = true;
   btnRecenter.classList.remove('active');
+  btnRecenter.setAttribute('aria-pressed', 'false');
   if (resumeTimer) clearTimeout(resumeTimer);
   if (lastPosition) {
     followCamera(map, [lastPosition.lon, lastPosition.lat], lastPosition.heading, { is3d });
@@ -141,18 +149,17 @@ function hideDestResults() {
   destResults.innerHTML = '';
 }
 
+function selectDestination(r) {
+  selectedDestination = r;
+  destInput.value = `${r.name}（${r.address}）`;
+  setStatus(`目的地を設定: ${r.name}`);
+  hideDestResults();
+}
+
 function showDestResults(results) {
   destResults.innerHTML = '';
   results.forEach((r) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<div class="dr-name">${r.name}</div><div class="dr-address">${r.address}</div>`;
-    li.addEventListener('click', () => {
-      selectedDestination = r;
-      destInput.value = `${r.name}（${r.address}）`;
-      setStatus(`目的地を設定: ${r.name}`);
-      hideDestResults();
-    });
-    destResults.appendChild(li);
+    destResults.appendChild(renderDestResultItem(r, selectDestination));
   });
   destResults.classList.remove('hidden');
 }
@@ -195,6 +202,7 @@ btnVoiceSearch.addEventListener('click', () => {
   startVoiceSearch({
     onStart: () => {
       btnVoiceSearch.classList.add('active');
+      btnVoiceSearch.setAttribute('aria-pressed', 'true');
       setStatus('音声を聞いています…');
     },
     onResult: (text) => {
@@ -203,7 +211,10 @@ btnVoiceSearch.addEventListener('click', () => {
       btnSearch.click();
     },
     onError: (message) => setStatus(message, true),
-    onEnd: () => btnVoiceSearch.classList.remove('active')
+    onEnd: () => {
+      btnVoiceSearch.classList.remove('active');
+      btnVoiceSearch.setAttribute('aria-pressed', 'false');
+    }
   });
 });
 
@@ -404,43 +415,61 @@ async function acquireWakeLock() {
 }
 
 async function startNav() {
+  const check = canStartNav({ destination: selectedDestination, position: lastPosition });
+  if (!check.ok) {
+    setStatus(check.reason, true);
+    return;
+  }
+
   // iOS Safari対策：unlockSpeech()はクリックハンドラ内でawaitより前に同期的に呼ぶ
   unlockSpeech();
 
-  navActive = true;
-  btnStart.classList.add('active');
-  btnStart.textContent = 'ナビ終了';
+  // ルート取得中は連打で複数回fetchが走らないようボタンを無効化する。
+  // navActiveは「ルート取得に成功してから」trueにする（失敗時に半端な状態が残らないように）。
+  btnStart.disabled = true;
+  guideMain.textContent = 'ルート取得中…';
 
-  if (selectedDestination && lastPosition) {
-    guideMain.textContent = 'ルート取得中…';
-    try {
-      currentRoute = await fetchRoute({
-        origin: { lat: lastPosition.lat, lon: lastPosition.lon },
-        destination: selectedDestination,
-        token: MAPBOX_TOKEN
-      });
-      tracker = createRouteTracker(currentRoute);
-      lastLoggedStepIndex = -1;
-      drawRoute(map, currentRoute.geometry);
-      guideMain.textContent = 'ナビ中';
-      speak('ナビを開始します');
-    } catch (err) {
-      guideMain.textContent = 'ルート取得エラー';
-      setStatus(`ルート取得エラー: ${err.message}`, true);
-      speak('ルートを取得できませんでした');
-    }
-  } else {
-    // 目的地未設定でも、画面消灯防止・音声解禁の実機確認はできるようにする（Step3の動作確認を壊さない）。
-    guideMain.textContent = 'ナビ中（目的地未設定）';
+  try {
+    const route = await fetchRoute({
+      origin: { lat: lastPosition.lat, lon: lastPosition.lon },
+      destination: selectedDestination,
+      token: MAPBOX_TOKEN
+    });
+
+    currentRoute = route;
+    tracker = createRouteTracker(route);
+    lastLoggedStepIndex = -1;
+    drawRoute(map, route.geometry);
+
+    navActive = true;
+    btnStart.classList.add('active');
+    btnStart.setAttribute('aria-pressed', 'true');
+    btnStart.textContent = 'ナビ終了';
+    guideMain.textContent = 'ナビ中';
     speak('ナビを開始します');
-  }
 
-  await acquireWakeLock();
+    await acquireWakeLock();
+  } catch (err) {
+    // 失敗時は「未開始」状態へ確実に戻す（ボタン表示・navActive・案内バー・ルート情報）。
+    currentRoute = null;
+    tracker = null;
+    clearRoute(map);
+    navActive = false;
+    btnStart.classList.remove('active');
+    btnStart.setAttribute('aria-pressed', 'false');
+    btnStart.textContent = 'ナビ開始';
+    guideMain.textContent = 'ナビ未開始';
+    setStatus(`ルート取得エラー: ${err.message}`, true);
+    speak('ルートを取得できませんでした');
+  } finally {
+    btnStart.disabled = false;
+  }
 }
 
 function stopNav() {
   navActive = false;
   btnStart.classList.remove('active');
+  btnStart.setAttribute('aria-pressed', 'false');
   btnStart.textContent = 'ナビ開始';
   guideMain.textContent = 'ナビ未開始';
 
