@@ -62,6 +62,21 @@ export const ROAD_CLASSES = [
   'motorway', 'trunk', 'primary', 'secondary', 'street', 'unknown'
 ];
 
+// ============================================================
+// SmartLaneの道路種別ごとの有効/無効（Phase 2判定パターンBへの準備）
+// Phase 1の実走結果（stats.htmlの取得率・HIGH率）を見てから値を調整する。
+// 例：地方一般道の取得率が低ければ street: false にして、
+//     高速・国道だけSmartLaneを有効化しMapbox標準案内にフォールバックする。
+// ============================================================
+export const SMART_LANE_ENABLED_ROAD_CLASSES = {
+  motorway: true,
+  trunk: true,
+  primary: true,
+  secondary: true,
+  street: true,
+  unknown: true
+};
+
 export const TEST_ROUTES = [
   'kitakami_city', 'kitakami_kamaishi', 'tohoku_expressway', 'morioka_city', 'other'
 ];

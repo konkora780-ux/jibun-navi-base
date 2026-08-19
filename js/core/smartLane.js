@@ -16,7 +16,7 @@
  */
 import { createSmartLaneAdvice } from './models.js';
 import { buildPhrase, describeManeuver } from './phrase.js';
-import { GPS_ACCURACY, LANE_CHANGE } from '../config.js';
+import { GPS_ACCURACY, LANE_CHANGE, SMART_LANE_ENABLED_ROAD_CLASSES } from '../config.js';
 
 function noGuidance({ confidence, reason, targetRoad = 'current', gpsDowngraded = false }) {
   return createSmartLaneAdvice({
@@ -96,6 +96,15 @@ export function evaluateSmartLane(input) {
     nextRoad, followingManeuver,
     currentSpeed, gpsAccuracy
   } = input;
+
+  // ステップ-1：この道路種別でSmartLaneが有効化されているか（Phase2判定パターンB対応）。
+  // データが取得できるかどうかとは別軸の「方針としてOFFにする」判定のため、最初に行う。
+  if (!SMART_LANE_ENABLED_ROAD_CLASSES[currentRoad.roadClass]) {
+    return noGuidance({
+      confidence: 'unknown',
+      reason: `roadClass=${currentRoad.roadClass} はSmartLane無効設定のため標準案内のみ`
+    });
+  }
 
   // ステップ0：データ有無の確認
   if (!currentRoad.lanes || currentRoad.lanes.length === 0) {
