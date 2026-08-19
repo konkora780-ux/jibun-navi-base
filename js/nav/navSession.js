@@ -45,8 +45,11 @@ export function createNavSession({ fetchRouteFn }) {
           destination,
           token
         });
+        // onSuccess（地図描画・Wake Lock取得等の後続処理）の完了を待ってから
+        // stateをactiveにする。ここをawaitしないと、onSuccess内で例外が起きても
+        // 「成功・active」のまま扱われてしまう（未処理のPromise rejectionにもなる）。
+        await handlers.onSuccess?.(route);
         state = 'active';
-        handlers.onSuccess?.(route);
         return { started: true };
       } catch (err) {
         state = 'idle';

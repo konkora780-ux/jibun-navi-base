@@ -220,6 +220,91 @@ test('ルート取得失敗後はstateがidleに戻り、onFailureが呼ばれ�
   assertEqual(failureErr.message, 'network down', 'onFailureに渡されたエラー内容');
 });
 
+// ---------- navSession：asyncなonSuccessをawaitしているか ----------
+test('asyncなonSuccessが正常終了した場合、完了後にstateがactiveになりstarted:trueになる', async () => {
+  let onSuccessResolved = false;
+  const session = createNavSession({ fetchRouteFn: async () => ({ steps: [] }) });
+
+  const r = await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    { onSuccess: async () => { await new Promise((res) => setTimeout(res, 10)); onSuccessResolved = true; } }
+  );
+
+  assertEqual(onSuccessResolved, true, 'onSuccessが完了していること');
+  assertEqual(r.started, true, 'started');
+  assertEqual(session.getState(), 'active', 'state');
+});
+
+test('asyncなonSuccessがエラーを投げた場合、失敗扱いになりstateがidleへ戻り、未処理のPromiseエラーが発生しない', async () => {
+  let unhandled = null;
+  const onUnhandled = (e) => { unhandled = e.reason; };
+  window.addEventListener('unhandledrejection', onUnhandled);
+
+  let failureErr = null;
+  const session = createNavSession({ fetchRouteFn: async () => ({ steps: [] }) });
+
+  const r = await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    {
+      onSuccess: async () => { throw new Error('drawRoute failed'); },
+      onFailure: (err) => { failureErr = err; }
+    }
+  );
+
+  // unhandledrejectionは非同期に発火することがあるため少し待ってから確認する
+  await new Promise((res) => setTimeout(res, 30));
+  window.removeEventListener('unhandledrejection', onUnhandled);
+
+  assertEqual(r.started, false, 'started');
+  assertEqual(r.phase, 'fetch-error', 'phase');
+  assertEqual(session.getState(), 'idle', 'state');
+  assertEqual(failureErr?.message, 'drawRoute failed', 'onFailureに渡されたエラー');
+  assertEqual(unhandled, null, '未処理のPromiseエラーが発生していないこと');
+});
+
+test('onSuccessの完了前はstateがactiveにならない（start()のPromiseも完了しない）', async () => {
+  let resolveOnSuccess;
+  const session = createNavSession({ fetchRouteFn: async () => ({ steps: [] }) });
+
+  const startPromise = session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    { onSuccess: () => new Promise((res) => { resolveOnSuccess = res; }) }
+  );
+
+  await new Promise((res) => setTimeout(res, 20));
+  assertEqual(session.getState(), 'loading', 'onSuccess完了前はloadingのままであること');
+
+  resolveOnSuccess();
+  const r = await startPromise;
+  assertEqual(session.getState(), 'active', 'onSuccess完了後はactiveになること');
+  assertEqual(r.started, true, 'onSuccess完了後にstart()のPromiseが解決すること');
+});
+
+test('onSuccess内の後続処理(地図描画等)が失敗した場合、main.js相当のロールバックが実行される', async () => {
+  // main.jsのonSuccessは「navActiveを先にtrueにする→後続処理」という順序のため、
+  // ここでも同じ順序を模して、失敗時にonFailureで確実に戻ることを確認する。
+  let navActiveSimulated = false;
+  let rolledBack = false;
+  const session = createNavSession({ fetchRouteFn: async () => ({ steps: [] }) });
+
+  await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    {
+      onSuccess: async () => {
+        navActiveSimulated = true;
+        throw new Error('drawRoute failed'); // 地図描画相当の失敗をシミュレート
+      },
+      onFailure: () => {
+        navActiveSimulated = false;
+        rolledBack = true;
+      }
+    }
+  );
+
+  assertEqual(navActiveSimulated, false, '失敗後はnavActive相当がfalseに戻っていること');
+  assertEqual(rolledBack, true, 'onFailureによるロールバックが実行されたこと');
+});
+
 // ---------- renderDestResultItem（XSS安全性） ----------
 test('検索結果の施設名にHTML文字列が含まれてもHTMLとして解釈されない', () => {
   const malicious = { name: '<img src=x onerror="window.__xssFired = true">', address: '<script>window.__xssFired2 = true<\/script>' };
