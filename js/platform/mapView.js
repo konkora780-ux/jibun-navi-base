@@ -74,27 +74,27 @@ const ROUTE_GLOW_INNER_WIDTH = [
 ];
 const ROUTE_CASING_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
-  10, 8, 14, 14, 16, 20, 17, 25, 18, 32, 20, 43
+  10, 9, 14, 17, 16, 26, 17, 30, 18, 32, 20, 43
 ];
 const ROUTE_OUTER_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
-  10, 6, 14, 12, 16, 17, 17, 22, 18, 28, 20, 38
+  10, 7, 14, 14, 16, 22, 17, 26, 18, 28, 20, 38
 ];
 const ROUTE_MAIN_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
-  10, 5, 14, 10, 16, 15, 17, 19, 18, 25, 20, 35
+  10, 5, 14, 11, 16, 18, 17, 22, 18, 24, 20, 34
 ];
 const ROUTE_HIGHLIGHT_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
-  10, 2, 14, 4, 16, 6, 17, 7, 18, 10, 20, 14
+  10, 2, 14, 4, 16, 7, 17, 8, 18, 10, 20, 14
 ];
 
 const ROUTE_COLORS = {
-  glow: '#66FF4A',
-  casing: '#006B18',
-  outer: '#00C72C',
-  main: '#42F238',
-  highlight: '#A6FF8D'
+  glow: '#55FF33',
+  casing: '#007A00',
+  outer: '#00C800',
+  main: '#55FF33',
+  highlight: '#B8FF9E'
 };
 
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
@@ -109,8 +109,8 @@ export function drawRoute(map, geometry) {
   map.addSource('route-line', { type: 'geojson', data });
 
   const layers = [
-    { id: 'route-line-glow-outer', color: ROUTE_COLORS.glow, width: ROUTE_GLOW_OUTER_WIDTH, opacity: 0.14 },
-    { id: 'route-line-glow-inner', color: ROUTE_COLORS.glow, width: ROUTE_GLOW_INNER_WIDTH, opacity: 0.24 },
+    { id: 'route-line-glow-outer', color: ROUTE_COLORS.glow, width: ROUTE_GLOW_OUTER_WIDTH, opacity: 0.18 },
+    { id: 'route-line-glow-inner', color: ROUTE_COLORS.glow, width: ROUTE_GLOW_INNER_WIDTH, opacity: 0.25 },
     { id: 'route-line-casing', color: ROUTE_COLORS.casing, width: ROUTE_CASING_WIDTH, opacity: 1.0 },
     { id: 'route-line-outer', color: ROUTE_COLORS.outer, width: ROUTE_OUTER_WIDTH, opacity: 1.0 },
     { id: 'route-line-main', color: ROUTE_COLORS.main, width: ROUTE_MAIN_WIDTH, opacity: 1.0 },
