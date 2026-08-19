@@ -185,13 +185,21 @@ function selectDestination(r) {
 
 let lastShownResults = [];
 
+// 現在地からの直線距離ラベル（同名候補の絞り込み用）。現在地未取得時はnull（非表示）。
+function distanceLabelFor(r) {
+  if (typeof turf === 'undefined' || !lastPosition || r.lat == null || r.lon == null) return null;
+  const meters = turf.distance([lastPosition.lon, lastPosition.lat], [r.lon, r.lat], { units: 'kilometers' }) * 1000;
+  return formatDistance(meters);
+}
+
 function showDestResults(results) {
   lastShownResults = results;
   destResults.innerHTML = '';
   results.forEach((r) => {
     destResults.appendChild(renderDestResultItem(r, selectDestination, {
       isFavorite: isFavorite(r),
-      onToggleFavorite: handleToggleFavorite
+      onToggleFavorite: handleToggleFavorite,
+      distanceLabel: distanceLabelFor(r)
     }));
   });
   destResults.classList.remove('hidden');

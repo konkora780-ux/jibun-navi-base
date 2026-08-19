@@ -9,12 +9,13 @@
 /**
  * @param {{name:string, address:string}} result
  * @param {(result: object) => void} onSelect
- * @param {{isFavorite?: boolean, onToggleFavorite?: (result: object) => void}} [options]
- *   onToggleFavoriteを渡した場合のみ、お気に入り星ボタンを表示する。
+ * @param {{isFavorite?: boolean, onToggleFavorite?: (result: object) => void, distanceLabel?: string|null}} [options]
+ *   onToggleFavoriteを渡した場合のみお気に入り星ボタンを、distanceLabelを渡した場合のみ
+ *   現在地からの距離表示を出す（同名候補の絞り込みに使う。距離の計算自体は呼び出し側の責任）。
  * @returns {HTMLLIElement}
  */
 export function renderDestResultItem(result, onSelect, options = {}) {
-  const { isFavorite = false, onToggleFavorite = null } = options;
+  const { isFavorite = false, onToggleFavorite = null, distanceLabel = null } = options;
 
   const li = document.createElement('li');
   li.setAttribute('role', 'option');
@@ -33,6 +34,14 @@ export function renderDestResultItem(result, onSelect, options = {}) {
 
   textWrap.appendChild(nameEl);
   textWrap.appendChild(addrEl);
+
+  if (distanceLabel) {
+    const distEl = document.createElement('div');
+    distEl.className = 'dr-distance';
+    distEl.textContent = `現在地から ${distanceLabel}`;
+    textWrap.appendChild(distEl);
+  }
+
   li.appendChild(textWrap);
 
   if (onToggleFavorite) {

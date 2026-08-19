@@ -906,6 +906,14 @@ test('renderDestResultItem: 星ボタンをクリックしてもonSelect（目�
   assertEqual(toggled?.name, 'X', 'onToggleFavoriteが呼ばれる');
   assertEqual(selected, false, 'onSelect（目的地選択）は呼ばれない');
 });
+test('renderDestResultItem: distanceLabelを渡さない場合は距離表示を出さない（後方互換）', () => {
+  const li = renderDestResultItem({ name: 'X', address: 'x' }, () => {});
+  assertEqual(li.querySelector('.dr-distance'), null, '距離表示が無い');
+});
+test('renderDestResultItem: distanceLabelを渡すと「現在地から」に続けて表示する', () => {
+  const li = renderDestResultItem({ name: 'X', address: 'x' }, () => {}, { distanceLabel: '1.2 km' });
+  assertEqual(li.querySelector('.dr-distance').textContent, '現在地から 1.2 km', '距離表示の文言');
+});
 test('renderDestResultItem: 施設名にHTML文字列が含まれても星ボタン付きでXSSにならない', () => {
   const sandbox = document.getElementById('sandbox');
   sandbox.innerHTML = '';
