@@ -6,20 +6,25 @@
  * 詳細は docs/01_SmartLane仕様.md の「1. データ型」を参照。
  */
 
+// Mapbox Directions APIの実レスポンスで確認した値（スペース区切り。camelCaseではない）。
+// docs/01_SmartLane仕様.md には簡略化された表記があるが、実データに合わせてこちらを正とする。
 export const LANE_DIRECTIONS = [
-  'left', 'slightLeft', 'straight', 'slightRight', 'right', 'uturn', 'none'
+  'left', 'sharp left', 'slight left', 'straight', 'slight right', 'sharp right', 'right', 'uturn', 'none'
 ];
 
 export const ROAD_CLASSES = [
   'motorway', 'trunk', 'primary', 'secondary', 'street', 'unknown'
 ];
 
+// Mapbox公式ドキュメントに列挙されている maneuver.type の全種類。
 export const MANEUVER_TYPES = [
-  'turn', 'fork', 'merge', 'on ramp', 'off ramp', 'roundabout', 'arrive'
+  'turn', 'new name', 'depart', 'arrive', 'merge', 'on ramp', 'off ramp',
+  'fork', 'end of road', 'continue', 'roundabout', 'rotary', 'roundabout turn',
+  'notification', 'exit roundabout', 'exit rotary'
 ];
 
 export const MANEUVER_MODIFIERS = [
-  'left', 'slight left', 'straight', 'slight right', 'right', 'uturn'
+  'uturn', 'sharp right', 'right', 'slight right', 'straight', 'slight left', 'left', 'sharp left'
 ];
 
 export const CONFIDENCE_LEVELS = ['high', 'medium', 'low', 'unknown'];
