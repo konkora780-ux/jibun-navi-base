@@ -128,7 +128,7 @@
 ```
 
 - **`testRouteId`** は走行前に画面のプルダウンで選ぶ。値：
-  `"kitakami_city"` / `"kitakami_kamaishi"` / `"tohoku_expressway"` / `"morioka_city"` / `"other"`
+  `"kitakami_city"` / `"kitakami_kamaishi"` / `"tono_city"` / `"tohoku_expressway"` / `"morioka_city"` / `"other"`
 
 ### Step 11：集計画面（★大幅拡張）
 
@@ -185,6 +185,7 @@
 |---|---|---|
 | `kitakami_city` | 北上市内の幹線道路 | 地方一般道 |
 | `kitakami_kamaishi` | 北上〜釜石（国道283号など） | 郊外の国道 |
+| `tono_city` | 遠野市内（国道283号沿い） | 郊外の国道・地方一般道 |
 | `tohoku_expressway` | 東北自動車道 | 高速のJCT・IC |
 | `morioka_city` | 盛岡市内 | 都市部の交差点 |
 

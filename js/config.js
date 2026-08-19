@@ -78,7 +78,7 @@ export const SMART_LANE_ENABLED_ROAD_CLASSES = {
 };
 
 export const TEST_ROUTES = [
-  'kitakami_city', 'kitakami_kamaishi', 'tohoku_expressway', 'morioka_city', 'other'
+  'kitakami_city', 'kitakami_kamaishi', 'tono_city', 'tohoku_expressway', 'morioka_city', 'other'
 ];
 
 // ============================================================
