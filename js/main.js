@@ -19,6 +19,7 @@ import { watchPosition, clearWatch, requestWakeLock } from './platform/location.
 import { unlockSpeech, speak } from './platform/voice.js';
 import { fetchRoute } from './platform/directions.js';
 import { searchDestination } from './platform/geocoding.js';
+import { isSpeechInputSupported, startVoiceSearch } from './platform/speechInput.js';
 import { createRouteTracker } from './nav/routeTracker.js';
 import { createRerouter } from './nav/rerouter.js';
 import { createSmartLaneInput } from './core/models.js';
@@ -179,6 +180,31 @@ btnSearch.addEventListener('click', async () => {
   } finally {
     btnSearch.disabled = false;
   }
+});
+
+// ---------- 音声検索 ----------
+// 既知の制約：iOS Safariはホーム画面追加後（PWA状態）だとこのAPIが動かないことがある。
+// 動かない場合もテキスト検索は独立して使えるようにしてあるので、ナビ自体は止まらない。
+const btnVoiceSearch = document.getElementById('btnVoiceSearch');
+if (!isSpeechInputSupported()) {
+  btnVoiceSearch.disabled = true;
+  btnVoiceSearch.title = 'この端末では音声検索が使えません（テキスト検索をお使いください）';
+}
+
+btnVoiceSearch.addEventListener('click', () => {
+  startVoiceSearch({
+    onStart: () => {
+      btnVoiceSearch.classList.add('active');
+      setStatus('音声を聞いています…');
+    },
+    onResult: (text) => {
+      destInput.value = text;
+      setStatus(`音声認識: ${text}`);
+      btnSearch.click();
+    },
+    onError: (message) => setStatus(message, true),
+    onEnd: () => btnVoiceSearch.classList.remove('active')
+  });
 });
 
 // 入力し直したら古い候補一覧は消す
