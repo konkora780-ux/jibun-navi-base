@@ -63,16 +63,7 @@ export function createUserMarker(map) {
 
 // ズームレベルに応じて線幅を変える式。道路そのものを塗りつぶすくらいの太さになるよう、
 // ズームが上がる（拡大する）ほど太くする。値はナビ標準ズーム(config.js MAP_FOLLOW.ZOOM=17)
-// 付近で道路一本分くらいを覆う太さを目安に調整している。
-const ROUTE_LINE_WIDTH = [
-  'interpolate', ['linear'], ['zoom'],
-  10, 4,
-  14, 9,
-  16, 14,
-  17, 18,
-  18, 24,
-  20, 34
-];
+// 付近で「外側26〜32px・内側18〜22px」（指定値）になるよう調整している。
 const ROUTE_CASING_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
   10, 7,
@@ -82,9 +73,46 @@ const ROUTE_CASING_WIDTH = [
   18, 31,
   20, 42
 ];
+const ROUTE_MAIN_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 4,
+  14, 9,
+  16, 14,
+  17, 18,
+  18, 24,
+  20, 34
+];
+
+// Mapbox GL JSのline-widthは太さ方向（線を横切る向き）のグラデーションを
+// サポートしないため、「中心が明るく外側ほど濃い」指定色は、太さの異なる
+// 単色の線を何重にも重ねることで近似する（内側ほど細く・明るい色を上に重ねる）。
+// 発光(グロー)効果も同様に、広く・薄い色の線を一番下に重ねて表現する。
+//
+// 注意：Mapboxのスタイル仕様では ["zoom"] を使った式（interpolate等）は
+// 他の式（["*", 係数, 式] など）の中に入れ子にできず、必ず独立したトップレベルの
+// interpolate式である必要がある。そのため「ズーム式を係数倍する」場合は、
+// ["*", 係数, interpolate式] ではなく、stopの値をあらかじめ係数倍した
+// 新しいinterpolate式を作る（実行時ではなく定義時に計算する）。
+function scaleWidth(baseExpr, factor) {
+  const [type, interpolation, zoomRef, ...stops] = baseExpr;
+  const scaledStops = [];
+  for (let i = 0; i < stops.length; i += 2) {
+    scaledStops.push(stops[i], stops[i + 1] * factor);
+  }
+  return [type, interpolation, zoomRef, ...scaledStops];
+}
+
+const ROUTE_COLORS = {
+  glow: 'rgba(85,255,51,0.35)',   // 指定のグロー効果
+  casing: '#007A00',              // 最外側の縁取り（濃緑）
+  outer: '#00C800',               // 外側の濃い部分
+  main: '#55FF33',                // メイン色（ルート中央）
+  highlight: '#B8FF9E'            // 中心色（明るい部分）
+};
 
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
-// 薄い黄緑の縁取り(casing)を下に敷いてから、濃い緑の線を重ねる（一般的なカーナビの配色）。
+// 指定色を外側から順に、グロー(2重・幅広で淡く)→縁取り→外側の濃い緑→メイン→
+// 中心のハイライトの6層で重ねる。
 export function drawRoute(map, geometry) {
   const data = { type: 'Feature', geometry };
   const source = map.getSource('route-line');
@@ -93,25 +121,36 @@ export function drawRoute(map, geometry) {
     return;
   }
   map.addSource('route-line', { type: 'geojson', data });
-  map.addLayer({
-    id: 'route-line-casing',
-    type: 'line',
-    source: 'route-line',
-    layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#a3e8b0', 'line-width': ROUTE_CASING_WIDTH, 'line-opacity': 0.9 }
-  });
-  map.addLayer({
-    id: 'route-line',
-    type: 'line',
-    source: 'route-line',
-    layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#22c55e', 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': 1 }
+
+  const layers = [
+    { id: 'route-line-glow-outer', color: ROUTE_COLORS.glow, width: scaleWidth(ROUTE_CASING_WIDTH, 1.8), opacity: 0.5 },
+    { id: 'route-line-glow-inner', color: ROUTE_COLORS.glow, width: scaleWidth(ROUTE_CASING_WIDTH, 1.3), opacity: 1 },
+    { id: 'route-line-casing', color: ROUTE_COLORS.casing, width: ROUTE_CASING_WIDTH, opacity: 1 },
+    { id: 'route-line-outer', color: ROUTE_COLORS.outer, width: scaleWidth(ROUTE_CASING_WIDTH, 0.75), opacity: 1 },
+    { id: 'route-line-main', color: ROUTE_COLORS.main, width: ROUTE_MAIN_WIDTH, opacity: 1 },
+    { id: 'route-line-highlight', color: ROUTE_COLORS.highlight, width: scaleWidth(ROUTE_MAIN_WIDTH, 0.35), opacity: 1 }
+  ];
+
+  layers.forEach(({ id, color, width, opacity }) => {
+    map.addLayer({
+      id,
+      type: 'line',
+      source: 'route-line',
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': color, 'line-width': width, 'line-opacity': opacity }
+    });
   });
 }
 
+const ROUTE_LAYER_IDS = [
+  'route-line-glow-outer', 'route-line-glow-inner', 'route-line-casing',
+  'route-line-outer', 'route-line-main', 'route-line-highlight'
+];
+
 export function clearRoute(map) {
-  if (map.getLayer('route-line')) map.removeLayer('route-line');
-  if (map.getLayer('route-line-casing')) map.removeLayer('route-line-casing');
+  ROUTE_LAYER_IDS.forEach((id) => {
+    if (map.getLayer(id)) map.removeLayer(id);
+  });
   if (map.getSource('route-line')) map.removeSource('route-line');
 }
 
