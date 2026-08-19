@@ -61,6 +61,7 @@ import { renderSmartLaneGuide } from '../js/ui/smartLaneGuide.js';
 import { pickTargetRoad } from '../js/core/models.js';
 import { resolveUpcomingRoadName, formatUpcomingRoadLabel } from '../js/core/formatNavigation.js';
 import { describeMapError, describeGpsAccuracyDegraded } from '../js/core/connectivityMessages.js';
+import { mergeIntoHistory } from '../js/log/destinationHistory.js';
 
 const cases = [];
 function test(description, fn) {
@@ -798,6 +799,35 @@ test('describeMapError: 技術的な例外文ではなく日本語の案内文�
 test('describeGpsAccuracyDegraded: 対応方法が分かる日本語文言を返す', () => {
   const r = describeGpsAccuracyDegraded();
   assertEqual(r, 'GPS精度が低下しています。安全な場所で端末の位置情報設定を確認してください', '指定文言と一致する');
+});
+
+// ---------- destinationHistory（目的地の検索履歴、純粋関数部分） ----------
+test('mergeIntoHistory: 空の履歴に追加すると1件になる', () => {
+  const r = mergeIntoHistory([], { name: '北上駅', address: '岩手県北上市' });
+  assertEqual(r.length, 1, '件数');
+  assertEqual(r[0].name, '北上駅', '内容');
+});
+test('mergeIntoHistory: 同じ目的地(name+address一致)を再度追加すると重複せず先頭に移動する', () => {
+  const existing = [
+    { name: 'A', address: '住所A' },
+    { name: '北上駅', address: '岩手県北上市' },
+    { name: 'B', address: '住所B' }
+  ];
+  const r = mergeIntoHistory(existing, { name: '北上駅', address: '岩手県北上市' });
+  assertEqual(r.length, 3, '件数は増えない（重複除去）');
+  assertEqual(r[0].name, '北上駅', '先頭に移動している');
+  assertEqual(r.filter((d) => d.name === '北上駅').length, 1, '重複していない');
+});
+test('mergeIntoHistory: name/addressどちらかが違えば別の目的地として扱う', () => {
+  const existing = [{ name: '北上駅', address: '岩手県北上市A' }];
+  const r = mergeIntoHistory(existing, { name: '北上駅', address: '岩手県北上市B' });
+  assertEqual(r.length, 2, '別の目的地として追加される（同名でも住所が違う）');
+});
+test('mergeIntoHistory: 上限(maxLength)を超えたら古いものから切り捨てる', () => {
+  const existing = [{ name: 'A' }, { name: 'B' }, { name: 'C' }];
+  const r = mergeIntoHistory(existing, { name: 'D' }, 3);
+  assertEqual(r.length, 3, '上限3件を超えない');
+  assertEqual(r.map((d) => d.name), ['D', 'A', 'B'], '新しいものが先頭、一番古い(C)が切り捨てられる');
 });
 
 // ---------- 実行 ----------

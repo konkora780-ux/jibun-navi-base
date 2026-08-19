@@ -44,8 +44,15 @@
   ⚠ 「再ルートの最短間隔」は10秒未満にしないでください。短くしすぎるとMapbox APIの呼び出しが増えすぎて、思わぬ課金が発生する恐れがあります。
 </div>
 
+<h2>目的地の検索履歴</h2>
+<p class="desc">選んだ目的地は自動的に記録され、次回の検索欄（未入力時）に候補として表示されます。端末内にのみ保存され、外部へは送信されません。</p>
+<div id="actions">
+  <button id="btnClearHistory">履歴を削除</button>
+</div>
+
 <script type="module">
 import { SETTABLE_GROUPS, SETTINGS_STORAGE_KEY, ROAD_CLASSES, validateSettingValue, validateGroupConsistency } from './js/config.js';
+import { clearHistory } from './js/log/destinationHistory.js';
 
 // group.key → 日本語ラベル（エラーメッセージ表示用）
 const FIELD_LABELS = {};
@@ -242,6 +249,12 @@ document.getElementById('btnReset').addEventListener('click', () => {
   if (confirm('設定を初期値に戻します。よろしいですか？')) {
     localStorage.removeItem(SETTINGS_STORAGE_KEY);
     location.reload();
+  }
+});
+
+document.getElementById('btnClearHistory').addEventListener('click', () => {
+  if (confirm('目的地の検索履歴を削除します。よろしいですか？')) {
+    clearHistory();
   }
 });
 </script>

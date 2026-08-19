@@ -43,6 +43,7 @@ import {
 } from './core/connectivityMessages.js';
 import { renderDebugPanel } from './ui/debugPanel.js';
 import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
+import { recordDestinationUse, getHistory } from './log/destinationHistory.js';
 
 const dbg = {
   status: document.getElementById('dbgStatus'),
@@ -169,6 +170,7 @@ function selectDestination(r) {
   destInput.value = `${r.name}（${r.address}）`;
   setStatus(`目的地を設定: ${r.name}`);
   hideDestResults();
+  recordDestinationUse(r);
 
   if (!destinationMarker) destinationMarker = createDestinationMarker(map);
   destinationMarker.update([r.lon, r.lat]);
@@ -241,8 +243,20 @@ btnVoiceSearch.addEventListener('click', () => {
   });
 });
 
-// 入力し直したら古い候補一覧は消す
-destInput.addEventListener('input', hideDestResults);
+// 入力欄が空のとき（未入力でタップした/全部消した）は、検索履歴を候補として出す。
+// 履歴はlocalStorageのみに保存され外部へは送信しない（log/destinationHistory.js）。
+function showHistoryIfInputEmpty() {
+  if (destInput.value.trim() !== '') return;
+  const history = getHistory();
+  if (history.length > 0) showDestResults(history);
+}
+
+// 入力し直したら古い候補一覧は消す（空になった場合は履歴を表示し直す）
+destInput.addEventListener('input', () => {
+  hideDestResults();
+  showHistoryIfInputEmpty();
+});
+destInput.addEventListener('focus', showHistoryIfInputEmpty);
 // 候補以外をタップ/クリックしたら閉じる
 document.addEventListener('click', (e) => {
   if (!destResults.classList.contains('hidden') && !e.target.closest('#destWrap')) {
