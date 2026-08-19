@@ -1,0 +1,118 @@
+/* 車載・横画面を前提にしたダークUI */
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: #0d1117;
+  color: #e6edf3;
+  font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  overflow: hidden;
+  -webkit-text-size-adjust: 100%;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right)
+           env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+
+/* ---------- 上部バー ---------- */
+#topbar {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 8px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex: 0 0 auto;
+}
+
+#topbar input, #topbar select {
+  background: #0d1117;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 15px;
+}
+#destInput { flex: 1 1 auto; min-width: 80px; }
+
+#topbar button {
+  background: #21262d;
+  color: #e6edf3;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 15px;
+  min-height: 40px;   /* 走行中でも押せる大きさ */
+  cursor: pointer;
+}
+#topbar button:disabled { opacity: .4; }
+#topbar button.toggle.active { background: #1f6feb; border-color: #1f6feb; }
+
+/* ---------- 本体 ---------- */
+#main { flex: 1 1 auto; display: flex; min-height: 0; }
+
+#map { flex: 1 1 auto; height: 100%; }
+
+#debugPanel {
+  flex: 0 0 260px;
+  overflow-y: auto;
+  background: #161b22;
+  border-left: 1px solid #30363d;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+#app.hide-debug #debugPanel { display: none; }
+
+#debugPanel h2 {
+  font-size: 12px;
+  color: #8b949e;
+  letter-spacing: .1em;
+  margin-bottom: 6px;
+}
+#debugPanel dl {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 3px 6px;
+}
+#debugPanel dt { color: #8b949e; }
+#debugPanel dd { color: #e6edf3; word-break: break-all; }
+
+/* GPS精度の色分け（緑=良好 / 黄=劣化 / 赤=案内停止） */
+.acc-good    { color: #3fb950; }
+.acc-degrade { color: #d29922; }
+.acc-bad     { color: #f85149; }
+.acc-unknown { color: #8b949e; }
+.warn        { color: #f85149; }
+
+/* ---------- 下部の案内バー ---------- */
+#guidebar {
+  flex: 0 0 auto;
+  padding: 10px 12px;
+  background: #161b22;
+  border-top: 1px solid #30363d;
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+}
+#guideMain { font-size: 22px; font-weight: 700; }
+#guideLane { font-size: 18px; color: #58a6ff; }
+
+/* ---------- 現在地マーカー ---------- */
+.user-marker {
+  width: 22px;
+  height: 22px;
+  clip-path: polygon(50% 0%, 100% 100%, 50% 78%, 0% 100%);
+  background: #58a6ff;
+  border: 1px solid #0d1117;
+}
+
+/* 縦画面のときはデバッグパネルを下に回す */
+@media (orientation: portrait) {
+  #main { flex-direction: column; }
+  #debugPanel { flex: 0 0 40%; border-left: none; border-top: 1px solid #30363d; }
+}

@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="じぶんNaviベース">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>じぶんNaviベース - Phase 1</title>
+
+<!--
+  Mapbox GL JS / Turf.js はメジャーバージョン指定で読み込みます。
+  理由：3系の最新パッチが自動で当たり、バージョン番号の書き換えが不要になるためです。
+  本番運用に入るときは、意図しない変更を防ぐため固定バージョンに切り替えてください。
+-->
+<link href="https://unpkg.com/mapbox-gl@3/dist/mapbox-gl.css" rel="stylesheet">
+<script src="https://unpkg.com/mapbox-gl@3/dist/mapbox-gl.js"></script>
+<script src="https://unpkg.com/@turf/turf@7/turf.min.js"></script>
+
+<link href="css/style.css" rel="stylesheet">
+</head>
+<body>
+
+<div id="app">
+
+  <!-- 上部バー -->
+  <header id="topbar">
+    <input id="destInput" type="text" placeholder="目的地を検索" disabled>
+    <button id="btnSearch" disabled>検索</button>
+    <button id="btnStart" disabled>ナビ開始</button>
+    <button id="btnRecenter" class="toggle" title="現在地に戻る">現在地</button>
+    <button id="btn3d" class="toggle">3D</button>
+    <button id="btnDebug" class="toggle active">DEBUG</button>
+    <select id="testRouteId" title="テストルート">
+      <option value="other">ルート未選択</option>
+      <option value="kitakami_city">北上市内</option>
+      <option value="kitakami_kamaishi">北上〜釜石</option>
+      <option value="tohoku_expressway">東北自動車道</option>
+      <option value="morioka_city">盛岡市内</option>
+    </select>
+  </header>
+
+  <!-- 本体 -->
+  <main id="main">
+    <div id="map"></div>
+
+    <aside id="debugPanel">
+      <h2>DEBUG</h2>
+      <dl>
+        <dt>状態</dt>        <dd id="dbgStatus">起動中</dd>
+        <dt>GPS</dt>         <dd id="dbgGps">—</dd>
+        <dt>精度</dt>        <dd id="dbgAccuracy" class="acc-unknown">—</dd>
+        <dt>速度</dt>        <dd id="dbgSpeed">—</dd>
+        <dt>道路種別</dt>    <dd id="dbgRoadClass">—</dd>
+        <dt>現在道路</dt>    <dd id="dbgRoadName">—</dd>
+        <dt>車線数</dt>      <dd id="dbgLaneCount">—</dd>
+        <dt>車線</dt>        <dd id="dbgLanes">—</dd>
+        <dt>MB推奨</dt>      <dd id="dbgMapboxLanes">—</dd>
+        <dt>SL推奨</dt>      <dd id="dbgSmartLanes">—</dd>
+        <dt>一致</dt>        <dd id="dbgMatched">—</dd>
+        <dt>次</dt>          <dd id="dbgNext">—</dd>
+        <dt>次々</dt>        <dd id="dbgFollowing">—</dd>
+        <dt>次の道路車線</dt><dd id="dbgNextLanes">—</dd>
+        <dt>信頼度</dt>      <dd id="dbgConfidence">—</dd>
+        <dt>取得不可</dt>    <dd id="dbgMissing" class="warn">—</dd>
+      </dl>
+    </aside>
+  </main>
+
+  <!-- 下部の案内バー -->
+  <footer id="guidebar">
+    <span id="guideMain">ナビ未開始</span>
+    <span id="guideLane"></span>
+  </footer>
+
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>
