@@ -94,7 +94,9 @@ carnavi/
 Mapbox GL JS・Turf.jsは、意図しない自動更新で挙動が変わることを防ぐため、バージョンを固定しています。
 
 - **Mapbox GL JS 3.28.1**：地図表示・3D地形・言語設定(`language:'ja'`)・Standardスタイルの`setConfigProperty`を使用。固定時点で動作確認済み
-- **Turf.js 7.4.0**：`nearestPointOnLine`（自車位置のルート吸着）で使用。バージョンにより戻り値のプロパティ名が異なる場合があるため固定（新プロパティ名`lineDistance`/`pointDistance`を使用）
+  - npm公式レジストリ（`registry.npmjs.org/mapbox-gl`）の`dist-tags.latest`が本バージョンを指していることを確認済み（3.28.0は3.28.1の1つ前のパッチで、差分はESMバンドルでのアイコン描画バグ修正のみ・破壊的変更なし）
+  - unpkg CDNのJS/CSSともHTTP 200で取得できることを確認済み
+- **Turf.js 7.4.0**：`nearestPointOnLine`（自車位置のルート吸着）で使用。バージョンにより戻り値のプロパティ名が異なる場合があるため固定（新プロパティ名`lineDistance`/`pointDistance`を使用）。CDNから取得できることを確認済み
 
 更新する場合は、地図・3D地形・ルート追跡（Turf.js）の動作を確認してから、`index.html`のCSSとJSのバージョン番号を両方揃えて変更してください。
 

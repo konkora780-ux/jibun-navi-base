@@ -45,7 +45,7 @@
 </div>
 
 <script type="module">
-import { SETTABLE_GROUPS, SETTINGS_STORAGE_KEY, ROAD_CLASSES, validateSettingValue } from './js/config.js';
+import { SETTABLE_GROUPS, SETTINGS_STORAGE_KEY, ROAD_CLASSES, validateSettingValue, validateGroupConsistency } from './js/config.js';
 
 // group.key → 日本語ラベル（エラーメッセージ表示用）
 const FIELD_LABELS = {};
@@ -163,24 +163,38 @@ function collectRawValues() {
   return raw;
 }
 
-// 全項目を検証する。1件でも不正なら保存させない（部分保存はしない）。
+// 全項目を検証してからまとめて反映する（1件ずつ即時反映しない）。
+// 1件でも不正なら保存させない（部分保存はしない）。
 function validateAll(rawValues) {
   const validated = {};
   const errors = [];
   form.querySelectorAll('input.invalid').forEach((el) => el.classList.remove('invalid'));
 
   Object.entries(rawValues).forEach(([group, values]) => {
-    validated[group] = {};
+    // 個々の値の検証。無効な項目は現在の値のままにしておく
+    // （グループ整合性チェックを、実際に保存されるであろう組み合わせに対して行うため）。
+    const candidate = { ...SETTABLE_GROUPS[group] };
     Object.entries(values).forEach(([key, rawValue]) => {
       const result = validateSettingValue(group, key, rawValue);
       const inputEl = form.querySelector(`input[data-group="${group}"][data-key="${key}"]`);
       if (result.valid) {
-        validated[group][key] = result.value;
+        candidate[key] = result.value;
+        inputEl?.classList.remove('invalid');
       } else {
         errors.push(`${FIELD_LABELS[`${group}.${key}`] ?? `${group}.${key}`}：${result.error}`);
         inputEl?.classList.add('invalid');
       }
     });
+
+    const consistency = validateGroupConsistency(group, candidate);
+    if (!consistency.valid) {
+      errors.push(consistency.error);
+      Object.keys(values).forEach((key) => {
+        form.querySelector(`input[data-group="${group}"][data-key="${key}"]`)?.classList.add('invalid');
+      });
+    }
+
+    validated[group] = candidate;
   });
   return { validated, errors };
 }

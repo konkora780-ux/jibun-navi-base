@@ -77,11 +77,46 @@ function computeMatchGroup(entries) {
   };
 }
 
+function heading(text) {
+  const h2 = document.createElement('h2');
+  h2.textContent = text;
+  return h2;
+}
+
+// 走行ログ(道路名・reason等)にはMapbox由来の外部データやlocalStorageの値が含まれるため、
+// innerHTMLへ直接埋め込まずcreateElement+textContentでDOMを組み立てる。
 function table(headers, rows) {
-  if (rows.length === 0) return '<p class="empty">データがありません</p>';
-  const thead = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
-  const tbody = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
-  return `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+  if (rows.length === 0) {
+    const p = document.createElement('p');
+    p.className = 'empty';
+    p.textContent = 'データがありません';
+    return p;
+  }
+
+  const tableEl = document.createElement('table');
+  const thead = document.createElement('thead');
+  const headRow = document.createElement('tr');
+  headers.forEach((h) => {
+    const th = document.createElement('th');
+    th.textContent = h;
+    headRow.appendChild(th);
+  });
+  thead.appendChild(headRow);
+  tableEl.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  rows.forEach((r) => {
+    const tr = document.createElement('tr');
+    r.forEach((c) => {
+      const td = document.createElement('td');
+      td.textContent = c;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  tableEl.appendChild(tbody);
+
+  return tableEl;
 }
 
 function render() {
@@ -94,12 +129,11 @@ function render() {
 
   const g = computeGroup(entries);
   const gpsAffected = entries.filter((e) => e.gpsDowngraded).length;
-
-  let html = '';
+  const nodes = [];
 
   // (A) 全体集計
-  html += '<h2>(A) 全体集計</h2>';
-  html += table(
+  nodes.push(heading('(A) 全体集計'));
+  nodes.push(table(
     ['項目', '値'],
     [
       ['通過交差点数', g.total],
@@ -111,32 +145,32 @@ function render() {
       ['Confidence UNKNOWN率', g.unknownRate],
       ['GPS精度による降格・停止件数', gpsAffected]
     ]
-  );
+  ));
 
   // (B) 道路種別ごとの集計
-  html += '<h2>(B) 道路種別ごとの集計</h2>';
-  html += table(
+  nodes.push(heading('(B) 道路種別ごとの集計'));
+  nodes.push(table(
     ['道路種別', '通過数', '車線取得数', '取得率', 'HIGH数', 'HIGH率', 'MEDIUM率', 'LOW率', 'UNKNOWN率'],
     ROAD_CLASSES.map((rc) => {
       const gg = computeGroup(entries.filter((e) => e.roadClass === rc));
       return [ROAD_CLASS_LABEL[rc] ?? rc, gg.total, gg.withLanes, gg.laneRate, gg.high, gg.highRate, gg.mediumRate, gg.lowRate, gg.unknownRate];
     })
-  );
+  ));
 
   // (C) テストルートごとの集計
-  html += '<h2>(C) テストルートごとの集計</h2>';
-  html += table(
+  nodes.push(heading('(C) テストルートごとの集計'));
+  nodes.push(table(
     ['ルート', '通過数', '車線取得数', '取得率', 'HIGH数', 'HIGH率', 'MEDIUM率', 'LOW率', 'UNKNOWN率'],
     TEST_ROUTES.map((tr) => {
       const gg = computeGroup(entries.filter((e) => e.testRouteId === tr));
       return [TEST_ROUTE_LABEL[tr] ?? tr, gg.total, gg.withLanes, gg.laneRate, gg.high, gg.highRate, gg.mediumRate, gg.lowRate, gg.unknownRate];
     })
-  );
+  ));
 
   // (D) Mapbox推奨との一致状況
-  html += '<h2>(D) Mapbox推奨との一致状況</h2>';
+  nodes.push(heading('(D) Mapbox推奨との一致状況'));
   const overallMatch = computeMatchGroup(entries);
-  html += table(
+  nodes.push(table(
     ['区分', '件数', '完全一致(exact)', '一部一致(partial)', '不一致(different)', '比較不能(unavailable)'],
     [
       ['全体', overallMatch.total, overallMatch.exactRate, overallMatch.partialRate, overallMatch.differentRate, overallMatch.unavailableRate],
@@ -145,12 +179,12 @@ function render() {
         return [ROAD_CLASS_LABEL[rc] ?? rc, mm.total, mm.exactRate, mm.partialRate, mm.differentRate, mm.unavailableRate];
       })
     ]
-  );
+  ));
 
   // (E) 不一致ケース一覧
-  html += '<h2>(E) 不一致ケース一覧（recommendationMatched = different）</h2>';
+  nodes.push(heading('(E) 不一致ケース一覧（recommendationMatched = different）'));
   const mismatches = entries.filter((e) => e.recommendationMatched === 'different');
-  html += table(
+  nodes.push(table(
     ['日時', '道路名', '道路種別', 'MB推奨', 'SL推奨', 'reason'],
     mismatches.map((e) => [
       new Date(e.timestamp).toLocaleString('ja-JP'),
@@ -160,9 +194,9 @@ function render() {
       (e.smartLaneRecommendedLanes ?? []).join(',') || '—',
       e.reason ?? ''
     ])
-  );
+  ));
 
-  document.getElementById('content').innerHTML = html;
+  document.getElementById('content').replaceChildren(...nodes);
 }
 
 document.getElementById('btnRefresh').addEventListener('click', render);

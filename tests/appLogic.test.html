@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>アプリロジック テスト（設定検証・ナビ開始ガード・検索結果のXSS安全性）</title>
+<title>アプリロジック テスト（設定検証・ナビ開始状態遷移・検索結果のXSS安全性）</title>
 <style>
   body { background:#0d1117; color:#e6edf3; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; padding:20px; }
   h1 { font-size:18px; }
@@ -31,8 +31,9 @@
 <ul id="sandbox"></ul>
 
 <script type="module">
-import { validateSettingValue } from '../js/config.js';
+import { validateSettingValue, validateGroupConsistency } from '../js/config.js';
 import { canStartNav } from '../js/nav/navGuard.js';
+import { createNavSession } from '../js/nav/navSession.js';
 import { renderDestResultItem } from '../js/ui/destResultsView.js';
 
 const cases = [];
@@ -93,6 +94,33 @@ test('未知のグループ/キーは保存されない', () => {
   assertEqual(r.valid, false, 'valid');
 });
 
+// ---------- validateGroupConsistency（複数項目間の矛盾チェック） ----------
+test('GOOD=15, DEGRADED=30（正常）は整合性チェックに合格する', () => {
+  const r = validateGroupConsistency('GPS_ACCURACY', { GOOD: 15, DEGRADED: 30 });
+  assertEqual(r.valid, true, 'valid');
+});
+
+test('GOOD=30, DEGRADED=30（境界値・同値）は整合性チェックに合格する', () => {
+  const r = validateGroupConsistency('GPS_ACCURACY', { GOOD: 30, DEGRADED: 30 });
+  assertEqual(r.valid, true, 'valid');
+});
+
+test('GOOD=31, DEGRADED=30（GOODがDEGRADEDを超える）は整合性チェックに不合格', () => {
+  const r = validateGroupConsistency('GPS_ACCURACY', { GOOD: 31, DEGRADED: 30 });
+  assertEqual(r.valid, false, 'valid');
+});
+
+test('localStorage上でGPS_ACCURACYが矛盾している場合、config.js読み込み時に初期値へ戻る', async () => {
+  localStorage.setItem('jibunnavi_base_settings_v1', JSON.stringify({ GPS_ACCURACY: { GOOD: 100, DEGRADED: 30 } }));
+  try {
+    const mod = await import('../js/config.js?consistency_test=' + Date.now());
+    assertEqual(mod.GPS_ACCURACY.GOOD, 15, 'GOODが初期値(15)に戻っていること');
+    assertEqual(mod.GPS_ACCURACY.DEGRADED, 30, 'DEGRADEDも初期値(30)のままであること');
+  } finally {
+    localStorage.removeItem('jibunnavi_base_settings_v1');
+  }
+});
+
 // ---------- canStartNav ----------
 test('目的地未設定ではナビ開始できない', () => {
   const r = canStartNav({ destination: null, position: { lat: 1, lon: 1 } });
@@ -107,6 +135,89 @@ test('現在地未取得ではナビ開始できない', () => {
 test('目的地・現在地とも揃っていればナビ開始できる', () => {
   const r = canStartNav({ destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 } });
   assertEqual(r.ok, true, 'ok');
+});
+
+// ---------- navSession（ナビ開始/終了の状態遷移） ----------
+test('目的地未設定ではfetchRouteが呼ばれない', async () => {
+  let calls = 0;
+  const session = createNavSession({ fetchRouteFn: async () => { calls++; return {}; } });
+  const r = await session.start({ destination: null, position: { lat: 1, lon: 1 }, token: 't' });
+  assertEqual(r.started, false, 'started');
+  assertEqual(r.phase, 'guard', 'phase');
+  assertEqual(calls, 0, 'fetchRoute呼び出し回数');
+});
+
+test('現在地未取得ではfetchRouteが呼ばれない', async () => {
+  let calls = 0;
+  const session = createNavSession({ fetchRouteFn: async () => { calls++; return {}; } });
+  const r = await session.start({ destination: { lat: 1, lon: 1 }, position: null, token: 't' });
+  assertEqual(r.started, false, 'started');
+  assertEqual(r.phase, 'guard', 'phase');
+  assertEqual(calls, 0, 'fetchRoute呼び出し回数');
+});
+
+test('ルート取得中は開始ボタンが無効になる（onLoadingStartが呼ばれる）', async () => {
+  let loadingStartCalled = false;
+  const session = createNavSession({ fetchRouteFn: async () => ({ steps: [] }) });
+  await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    { onLoadingStart: () => { loadingStartCalled = true; } }
+  );
+  assertEqual(loadingStartCalled, true, 'onLoadingStartが呼ばれたこと');
+});
+
+test('連打してもfetchRouteは1回だけ呼ばれる', async () => {
+  let calls = 0;
+  let resolveFetch;
+  const session = createNavSession({
+    fetchRouteFn: () => { calls++; return new Promise((resolve) => { resolveFetch = resolve; }); }
+  });
+  const args = { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' };
+
+  const first = session.start(args); // 1回目：取得中のまま止める
+  const second = session.start(args); // 2回目：連打（busyで弾かれるはず）
+
+  const secondResult = await second;
+  assertEqual(secondResult.started, false, '2回目のstarted');
+  assertEqual(secondResult.phase, 'busy', '2回目のphase');
+  assertEqual(calls, 1, 'fetchRoute呼び出し回数は1回のみ');
+
+  resolveFetch({ steps: [] });
+  await first;
+});
+
+test('ルート取得成功後だけnavSessionの状態がactiveになり、onSuccessが呼ばれる', async () => {
+  const fakeRoute = { steps: [] };
+  let successRoute = null;
+  let failureCalled = false;
+  const session = createNavSession({ fetchRouteFn: async () => fakeRoute });
+
+  const r = await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    { onSuccess: (route) => { successRoute = route; }, onFailure: () => { failureCalled = true; } }
+  );
+
+  assertEqual(r.started, true, 'started');
+  assertEqual(session.getState(), 'active', 'state');
+  assertEqual(successRoute, fakeRoute, 'onSuccessに渡されたroute');
+  assertEqual(failureCalled, false, 'onFailureは呼ばれないこと');
+});
+
+test('ルート取得失敗後はstateがidleに戻り、onFailureが呼ばれ、onSuccessは呼ばれない', async () => {
+  let successCalled = false;
+  let failureErr = null;
+  const session = createNavSession({ fetchRouteFn: async () => { throw new Error('network down'); } });
+
+  const r = await session.start(
+    { destination: { lat: 1, lon: 1 }, position: { lat: 2, lon: 2 }, token: 't' },
+    { onSuccess: () => { successCalled = true; }, onFailure: (err) => { failureErr = err; } }
+  );
+
+  assertEqual(r.started, false, 'started');
+  assertEqual(r.phase, 'fetch-error', 'phase');
+  assertEqual(session.getState(), 'idle', '失敗後はidleに戻ること');
+  assertEqual(successCalled, false, 'onSuccessは呼ばれないこと');
+  assertEqual(failureErr.message, 'network down', 'onFailureに渡されたエラー内容');
 });
 
 // ---------- renderDestResultItem（XSS安全性） ----------
@@ -140,15 +251,16 @@ function assertEqual(actual, expected, label) {
   }
 }
 
-function run() {
+async function run() {
   const body = document.getElementById('resultBody');
   let passCount = 0;
 
-  cases.forEach((c, i) => {
+  for (let i = 0; i < cases.length; i++) {
+    const c = cases[i];
     let pass = true;
     let detail = 'OK';
     try {
-      c.fn();
+      await c.fn();
     } catch (e) {
       pass = false;
       detail = e.message;
@@ -166,7 +278,7 @@ function run() {
       tr.appendChild(td);
     });
     body.appendChild(tr);
-  });
+  }
 
   const summary = document.getElementById('summary');
   summary.textContent = `${passCount} / ${cases.length} 件パス`;

@@ -22,7 +22,7 @@ import { searchDestination } from './platform/geocoding.js';
 import { isSpeechInputSupported, startVoiceSearch } from './platform/speechInput.js';
 import { createRouteTracker } from './nav/routeTracker.js';
 import { createRerouter } from './nav/rerouter.js';
-import { canStartNav } from './nav/navGuard.js';
+import { createNavSession } from './nav/navSession.js';
 import { renderDestResultItem } from './ui/destResultsView.js';
 import { createSmartLaneInput } from './core/models.js';
 import { evaluateSmartLane } from './core/smartLane.js';
@@ -93,10 +93,11 @@ let lastPosition = null;
 let userMarker = null;
 let watchId = null;
 
+// btnRecenterは「現在地へ戻る」単発操作ボタンとして扱う（aria-pressedは付けない）。
+// activeクラスは「追従が止まっていて、押すと復帰できる」という視覚的な注意喚起のみに使う。
 function pauseFollow() {
   isFollowing = false;
   btnRecenter.classList.add('active');
-  btnRecenter.setAttribute('aria-pressed', 'true');
   if (resumeTimer) clearTimeout(resumeTimer);
   resumeTimer = setTimeout(resumeFollow, MAP_FOLLOW.RESUME_AFTER_SECONDS * 1000);
 }
@@ -104,7 +105,6 @@ function pauseFollow() {
 function resumeFollow() {
   isFollowing = true;
   btnRecenter.classList.remove('active');
-  btnRecenter.setAttribute('aria-pressed', 'false');
   if (resumeTimer) clearTimeout(resumeTimer);
   if (lastPosition) {
     followCamera(map, [lastPosition.lon, lastPosition.lat], lastPosition.heading, { is3d });
@@ -414,59 +414,65 @@ async function acquireWakeLock() {
   }
 }
 
-async function startNav() {
-  const check = canStartNav({ destination: selectedDestination, position: lastPosition });
-  if (!check.ok) {
-    setStatus(check.reason, true);
-    return;
-  }
+const navSession = createNavSession({ fetchRouteFn: fetchRoute });
 
+async function startNav() {
   // iOS Safari対策：unlockSpeech()はクリックハンドラ内でawaitより前に同期的に呼ぶ
   unlockSpeech();
 
-  // ルート取得中は連打で複数回fetchが走らないようボタンを無効化する。
-  // navActiveは「ルート取得に成功してから」trueにする（失敗時に半端な状態が残らないように）。
-  btnStart.disabled = true;
-  guideMain.textContent = 'ルート取得中…';
+  const result = await navSession.start(
+    { destination: selectedDestination, position: lastPosition, token: MAPBOX_TOKEN },
+    {
+      onLoadingStart: () => {
+        // ルート取得中は連打で複数回fetchが走らないようボタンを無効化する
+        // （navSession自体も二重起動を防ぐが、UI上も分かりやすく無効化する）。
+        btnStart.disabled = true;
+        guideMain.textContent = 'ルート取得中…';
+      },
+      onSuccess: async (route) => {
+        currentRoute = route;
+        tracker = createRouteTracker(route);
+        lastLoggedStepIndex = -1;
+        drawRoute(map, route.geometry);
 
-  try {
-    const route = await fetchRoute({
-      origin: { lat: lastPosition.lat, lon: lastPosition.lon },
-      destination: selectedDestination,
-      token: MAPBOX_TOKEN
-    });
+        navActive = true;
+        btnStart.classList.add('active');
+        btnStart.setAttribute('aria-pressed', 'true');
+        btnStart.textContent = 'ナビ終了';
+        guideMain.textContent = 'ナビ中';
+        speak('ナビを開始します');
 
-    currentRoute = route;
-    tracker = createRouteTracker(route);
-    lastLoggedStepIndex = -1;
-    drawRoute(map, route.geometry);
+        // 成功時だけWake Lockを取得する。
+        await acquireWakeLock();
+      },
+      onFailure: (err) => {
+        // 失敗時は「未開始」状態へ確実に戻す（ボタン表示・navActive・案内バー・ルート情報）。
+        // Wake Lockはここでは一度も取得していない。
+        currentRoute = null;
+        tracker = null;
+        clearRoute(map);
+        navActive = false;
+        btnStart.classList.remove('active');
+        btnStart.setAttribute('aria-pressed', 'false');
+        btnStart.textContent = 'ナビ開始';
+        guideMain.textContent = 'ナビ未開始';
+        setStatus(`ルート取得エラー: ${err.message}`, true);
+        speak('ルートを取得できませんでした');
+      }
+    }
+  );
 
-    navActive = true;
-    btnStart.classList.add('active');
-    btnStart.setAttribute('aria-pressed', 'true');
-    btnStart.textContent = 'ナビ終了';
-    guideMain.textContent = 'ナビ中';
-    speak('ナビを開始します');
-
-    await acquireWakeLock();
-  } catch (err) {
-    // 失敗時は「未開始」状態へ確実に戻す（ボタン表示・navActive・案内バー・ルート情報）。
-    currentRoute = null;
-    tracker = null;
-    clearRoute(map);
-    navActive = false;
-    btnStart.classList.remove('active');
-    btnStart.setAttribute('aria-pressed', 'false');
-    btnStart.textContent = 'ナビ開始';
-    guideMain.textContent = 'ナビ未開始';
-    setStatus(`ルート取得エラー: ${err.message}`, true);
-    speak('ルートを取得できませんでした');
-  } finally {
-    btnStart.disabled = false;
+  // ガード判定（目的地/現在地未取得）で開始できなかった場合のみ、ここでメッセージを出す。
+  // ルート取得失敗の場合はonFailureで既に表示済みなので重複させない。
+  if (result.phase === 'guard') {
+    setStatus(result.reason, true);
   }
+
+  btnStart.disabled = false;
 }
 
 function stopNav() {
+  navSession.stop();
   navActive = false;
   btnStart.classList.remove('active');
   btnStart.setAttribute('aria-pressed', 'false');

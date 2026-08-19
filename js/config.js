@@ -112,6 +112,10 @@ export const SETTABLE_GROUPS = {
   GPS_ACCURACY, LANE_CHANGE, REROUTE, MAP_FOLLOW, TERRAIN, SMART_LANE_ENABLED_ROAD_CLASSES
 };
 
+// 上書き前のデフォルト値を保持しておく。グループ内の値どうしが矛盾していた場合、
+// そのグループ全体をこの初期値に戻すために使う。
+const DEFAULT_SETTABLE_GROUPS = JSON.parse(JSON.stringify(SETTABLE_GROUPS));
+
 // 各設定値の許容範囲。settings.html（保存前チェック）とここ（読み込み時チェック）の
 // 両方で同じスキーマを使う。理由：localStorageは開発者ツール等から直接書き換えられる
 // 可能性があるため、保存側だけでなく読み込み側でも必ず検証する。
@@ -180,20 +184,48 @@ export function validateSettingValue(group, key, rawValue) {
   return { valid: true, value: num };
 }
 
+// 個々の値の範囲チェックだけでは防げない、複数項目間の矛盾を確認する。
+// 例：GPS_ACCURACY.GOOD（良好とみなす精度）がDEGRADED（案内停止の精度）より
+// 大きいと、「良好」の方が「劣化」より条件が悪いという矛盾になる。
+//
+// @param {string} group
+// @param {object} candidateValues そのグループに適用しようとしている値一式（既存値＋今回の変更をマージ済みのもの）
+// @returns {{valid:true} | {valid:false, error:string}}
+export function validateGroupConsistency(group, candidateValues) {
+  if (group === 'GPS_ACCURACY' && candidateValues.GOOD > candidateValues.DEGRADED) {
+    return { valid: false, error: '良好とみなす精度は、案内停止の精度以下にしてください' };
+  }
+  return { valid: true };
+}
+
 try {
   const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
   if (raw) {
     const overrides = JSON.parse(raw);
     Object.entries(overrides).forEach(([groupName, values]) => {
       if (!SETTABLE_GROUPS[groupName] || typeof values !== 'object' || values === null) return;
+
+      // まず個々の値を検証する。無効な項目は候補に反映せず、既存の値のまま残す
+      // （片方だけ不正値を無視した結果、残った値どうしで新たな矛盾が生まれないよう、
+      // 　この時点ではまだ確定させず、次の整合性チェックにかける）。
+      const candidate = { ...SETTABLE_GROUPS[groupName] };
       Object.entries(values).forEach(([key, rawValue]) => {
         const result = validateSettingValue(groupName, key, rawValue);
         if (result.valid) {
-          SETTABLE_GROUPS[groupName][key] = result.value;
+          candidate[key] = result.value;
         } else {
           console.warn(`設定値が不正なため無視しました（${groupName}.${key}）: ${result.error}`);
         }
       });
+
+      const consistency = validateGroupConsistency(groupName, candidate);
+      if (!consistency.valid) {
+        console.warn(`設定値の組み合わせが不正なため、${groupName}を初期値に戻しました: ${consistency.error}`);
+        Object.assign(SETTABLE_GROUPS[groupName], DEFAULT_SETTABLE_GROUPS[groupName]);
+        return;
+      }
+
+      Object.assign(SETTABLE_GROUPS[groupName], candidate);
     });
   }
 } catch (err) {
