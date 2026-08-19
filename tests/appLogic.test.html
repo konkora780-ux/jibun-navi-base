@@ -614,6 +614,39 @@ test('maneuverIcon: maneuver自体がnull（ナビ未開始等）でも例外を
   const straight = renderManeuverIcon({ type: 'turn', modifier: 'straight' });
   assertEqual(nullResult, straight, 'nullでもstraightにフォールバック');
 });
+test('maneuverIcon: sharp left/rightはleft/rightと同じアイコンになる', () => {
+  assertEqual(renderManeuverIcon({ type: 'turn', modifier: 'sharp left' }), renderManeuverIcon({ type: 'turn', modifier: 'left' }), 'sharp left = left');
+  assertEqual(renderManeuverIcon({ type: 'turn', modifier: 'sharp right' }), renderManeuverIcon({ type: 'turn', modifier: 'right' }), 'sharp right = right');
+});
+test('maneuverIcon: straight/left/right/slightLeft/slightRight/uturnの6種はすべて異なるアイコンである', () => {
+  const all = [
+    renderManeuverIcon({ type: 'turn', modifier: 'straight' }),
+    renderManeuverIcon({ type: 'turn', modifier: 'left' }),
+    renderManeuverIcon({ type: 'turn', modifier: 'right' }),
+    renderManeuverIcon({ type: 'turn', modifier: 'slight left' }),
+    renderManeuverIcon({ type: 'turn', modifier: 'slight right' }),
+    renderManeuverIcon({ type: 'turn', modifier: 'uturn' })
+  ];
+  assertEqual(new Set(all).size, all.length, '6種すべて別々のアイコンである（誤って同じ矢印に丸められていない）');
+});
+test('maneuverIcon: rotary/roundabout turn/exit roundabout/exit rotaryはすべてroundaboutと同じアイコンになる', () => {
+  const base = renderManeuverIcon({ type: 'roundabout', modifier: null });
+  ['rotary', 'roundabout turn', 'exit roundabout', 'exit rotary'].forEach((type) => {
+    assertEqual(renderManeuverIcon({ type, modifier: null }), base, `${type}はroundaboutと同じアイコン`);
+  });
+});
+test('maneuverIcon: merge/on rampはmodifier無しならmerge、方向指定があればその方向のアイコンになる', () => {
+  const merge = renderManeuverIcon({ type: 'merge', modifier: null });
+  assertEqual(renderManeuverIcon({ type: 'on ramp', modifier: null }), merge, 'on rampもmerge扱い');
+  assertEqual(renderManeuverIcon({ type: 'merge', modifier: 'left' }), renderManeuverIcon({ type: 'turn', modifier: 'left' }), 'merge+left→left系');
+  assertEqual(renderManeuverIcon({ type: 'merge', modifier: 'slight right' }), renderManeuverIcon({ type: 'turn', modifier: 'right' }), 'merge+slight right→right系');
+});
+test('maneuverIcon: off ramp/forkはmodifier無しならfork、方向指定があればその方向のアイコンになる', () => {
+  const fork = renderManeuverIcon({ type: 'fork', modifier: null });
+  assertEqual(renderManeuverIcon({ type: 'off ramp', modifier: null }), fork, 'off rampもfork扱い');
+  assertEqual(renderManeuverIcon({ type: 'off ramp', modifier: 'right' }), renderManeuverIcon({ type: 'turn', modifier: 'right' }), 'off ramp+right→right系');
+  assertEqual(renderManeuverIcon({ type: 'fork', modifier: 'left' }), renderManeuverIcon({ type: 'turn', modifier: 'left' }), 'fork+left→left系');
+});
 
 // ---------- smartLaneGuide（Confidenceごとの表示・音声可否の切り替え） ----------
 test('smartLaneGuide: confidence=lowのときは「参考程度」の控えめな文言になる', () => {
