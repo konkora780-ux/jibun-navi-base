@@ -25,10 +25,12 @@
 | ✅ 完了 | 仕様書3点の作成 |
 | ✅ 完了 | **Phase 1（Step 1〜11）実装**：地図・GPS追従・画面消灯防止/音声解禁・SmartLane本体（自動テスト20件通過）・目的地検索・自動再ルート・走行ログ・集計画面 |
 | ✅ 完了 | **Phase 2（初期）**：全画面フローティングUI・設定画面（`settings.html`）・音声検索・目的地マーカー |
-| ✅ 完了 | **Phase 2A**：他社カーナビ(COCCHi等)を参考にした実走用ナビパネル・到着判定・標準音声案内・SmartLane専用表示・通信/GPS状態表示（自動テスト追加、`appLogic.test.html`が79件通過） |
+| ✅ 完了 | **Phase 2A**：他社カーナビ(COCCHi等)を参考にした実走用ナビパネル・到着判定・標準音声案内・SmartLane専用表示・通信/GPS状態表示 |
+| ✅ 完了 | **Phase 2A実走フィードバック対応**：距離音声案内の逆戻り防止、SmartLaneへ渡す車線データの選択ミス修正、案内パネル/音声の道路名統一（次の道路優先）、手動終了時の音声停止（到着音声は保護）、DEBUGパネル既定非表示・ナビ未開始時のコンパクト表示、地図/GPS精度エラーの利用者向けバナー表示 |
+| ✅ 完了 | **目的地の検索履歴・お気に入り**（Phase 2B先行実装。追加費用¥0、外部API未登録） |
 | ⬜ 次 | **実車での走行確認**（`docs/05_Phase2A実走確認チェックリスト.md`）。その後、Phase 2B以降（`docs/04_COCCHi比較・今後の改善計画.md`、設計のみ・未実装） |
 
-Phase 1〜2Aのコードは自動テスト（`tests/smartLane.test.html` 20件、`tests/appLogic.test.html` 79件）をすべて通過済みです。**ただし実車での走行確認はまだ行っていません。**
+Phase 1〜2A・実走フィードバック対応のコードは自動テスト（`tests/smartLane.test.html` 20件、`tests/appLogic.test.html` 114件）をすべて通過済みです。**ただし実車での走行確認はまだ行っていません。**
 
 ---
 
@@ -214,7 +216,7 @@ jibun-navi-base/
 │   ├─ nav/            ナビ進行の自前実装
 │   ├─ ui/
 │   └─ log/
-└─ tests/               smartLane.test.html（20件）／appLogic.test.html（79件）
+└─ tests/               smartLane.test.html（20件）／appLogic.test.html（114件）
 ```
 
 ---

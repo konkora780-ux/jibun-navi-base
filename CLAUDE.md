@@ -80,14 +80,14 @@ jibun-navi-base/
 │   ├─ config.js            ← トークン・定数（SETTINGS_SCHEMAで範囲・整合性を検証）
 │   ├─ main.js              ← 起動・全体の配線
 │   ├─ core/                ← ★依存ゼロ。将来Android移植時もそのまま使う（純粋関数のみ）
-│   │   ├─ models.js        ← データ型の定義とファクトリ
+│   │   ├─ models.js        ← データ型の定義とファクトリ、pickTargetRoad（advice.targetRoadに対応する道路を選ぶ唯一の判定元、Phase2A）
 │   │   ├─ smartLane.js     ← 中核ロジック
 │   │   ├─ phrase.js        ← 日本語文言の生成
 │   │   ├─ compare.js       ← Mapbox推奨との比較
-│   │   ├─ formatNavigation.js      ← 距離・時間・ETAの表示フォーマット（Phase2A）
+│   │   ├─ formatNavigation.js      ← 距離・時間・ETA・道路名ラベルの表示フォーマット（Phase2A）
 │   │   ├─ arrivalJudge.js          ← 到着の瞬間判定（Phase2A）
-│   │   ├─ voiceDecision.js         ← 標準音声案内の発話タイミング・文言（Phase2A）
-│   │   └─ connectivityMessages.js  ← 通信/GPSエラーの日本語メッセージ（Phase2A）
+│   │   ├─ voiceDecision.js         ← 標準音声案内の発話タイミング・文言（Phase2A。しきい値は一番近いものだけ発話し、通過済みの遠い段階はconsumedKeysで無音消費する）
+│   │   └─ connectivityMessages.js  ← 通信/GPS/地図エラーの日本語メッセージ（Phase2A）
 │   ├─ platform/            ← 外部APIに依存する層
 │   │   ├─ directions.js    ← Directions API 呼び出し + 正規化
 │   │   ├─ geocoding.js     ← 目的地検索（Search Box API）
@@ -107,16 +107,17 @@ jibun-navi-base/
 │   ├─ ui/
 │   │   ├─ debugPanel.js
 │   │   ├─ laneView.js            ← DEBUGパネル用の車線矢印描画
-│   │   ├─ destResultsView.js     ← 検索候補一覧の描画
+│   │   ├─ destResultsView.js     ← 検索候補一覧の描画（お気に入り★ボタンはonToggleFavorite指定時のみ表示、後方互換）
 │   │   ├─ navigationPanel.js     ← 実走用ナビ案内パネルの描画（Phase2A）
 │   │   ├─ maneuverIcon.js        ← 自作の方向アイコン（Phase2A、未知の組み合わせはstraightへ安全フォールバック）
 │   │   └─ smartLaneGuide.js      ← 実走用パネルのSmartLane表示（Confidenceごとの表示切替、Phase2A）
 │   └─ log/
-│       └─ driveLog.js      ← 走行ログの記録とエクスポート
+│       ├─ driveLog.js             ← 走行ログの記録とエクスポート
+│       └─ destinationHistory.js   ← 目的地の検索履歴・お気に入り（localStorageのみ、外部送信なし）
 ├─ tests/
 │   ├─ fixtures/*.json      ← SmartLaneのテストケース
 │   ├─ smartLane.test.html  ← SmartLane本体のテスト（全20ケース）
-│   └─ appLogic.test.html   ← 設定検証・ナビ状態遷移・XSS安全性・Phase2A（79ケース）
+│   └─ appLogic.test.html   ← 設定検証・ナビ状態遷移・XSS安全性・Phase2A（114ケース）
 └─ README.md
 ```
 
