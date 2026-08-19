@@ -13,7 +13,7 @@ import {
 } from './config.js';
 import {
   createMap, enableTerrain, pickLightPreset, applyLightPreset,
-  createUserMarker, followCamera, drawRoute, clearRoute
+  createUserMarker, createDestinationMarker, followCamera, drawRoute, clearRoute
 } from './platform/mapView.js';
 import { watchPosition, clearWatch, requestWakeLock } from './platform/location.js';
 import { unlockSpeech, speak } from './platform/voice.js';
@@ -149,11 +149,21 @@ function hideDestResults() {
   destResults.innerHTML = '';
 }
 
+let destinationMarker = null;
+
 function selectDestination(r) {
   selectedDestination = r;
   destInput.value = `${r.name}（${r.address}）`;
   setStatus(`目的地を設定: ${r.name}`);
   hideDestResults();
+
+  if (!destinationMarker) destinationMarker = createDestinationMarker(map);
+  destinationMarker.update([r.lon, r.lat]);
+
+  // 選んだ場所を地図で一瞬確認できるようにする。自動追従は既存のpauseFollowの
+  // 仕組みでMAP_FOLLOW.RESUME_AFTER_SECONDS秒後に自動的に自車位置へ戻る。
+  pauseFollow();
+  map.easeTo({ center: [r.lon, r.lat], zoom: Math.min(map.getZoom(), 14), duration: 600 });
 }
 
 function showDestResults(results) {

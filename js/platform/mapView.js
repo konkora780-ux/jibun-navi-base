@@ -61,6 +61,22 @@ export function createUserMarker(map) {
   };
 }
 
+// 検索で選んだ目的地のマーカー。Mapbox標準のピン(赤)をそのまま使う。
+export function createDestinationMarker(map) {
+  const marker = new mapboxgl.Marker({ color: '#f85149' }).setLngLat([0, 0]);
+  let added = false;
+
+  return {
+    update(lngLat) {
+      marker.setLngLat(lngLat);
+      if (!added) {
+        marker.addTo(map);
+        added = true;
+      }
+    }
+  };
+}
+
 // ズームレベルに応じて線幅を変える式。各層ごとに独立したinterpolate式にしている。
 // 理由：Mapboxのスタイル仕様では ["zoom"] を使った式は他の式（["*", 係数, 式] 等）に
 // 入れ子にできず、必ず独立したトップレベルのinterpolate式である必要があるため。
