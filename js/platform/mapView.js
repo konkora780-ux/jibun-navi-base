@@ -61,58 +61,44 @@ export function createUserMarker(map) {
   };
 }
 
-// ズームレベルに応じて線幅を変える式。道路そのものを塗りつぶすくらいの太さになるよう、
-// ズームが上がる（拡大する）ほど太くする。値はナビ標準ズーム(config.js MAP_FOLLOW.ZOOM=17)
-// 付近で「外側26〜32px・内側18〜22px」（指定値）になるよう調整している。
+// ズームレベルに応じて線幅を変える式。各層ごとに独立したinterpolate式にしている。
+// 理由：Mapboxのスタイル仕様では ["zoom"] を使った式は他の式（["*", 係数, 式] 等）に
+// 入れ子にできず、必ず独立したトップレベルのinterpolate式である必要があるため。
+const ROUTE_GLOW_OUTER_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 12, 14, 22, 16, 31, 17, 38, 18, 49, 20, 66
+];
+const ROUTE_GLOW_INNER_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 9, 14, 17, 16, 24, 17, 30, 18, 39, 20, 53
+];
 const ROUTE_CASING_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
-  10, 7,
-  14, 13,
-  16, 19,
-  17, 24,
-  18, 31,
-  20, 42
+  10, 8, 14, 14, 16, 20, 17, 25, 18, 32, 20, 43
+];
+const ROUTE_OUTER_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 6, 14, 12, 16, 17, 17, 22, 18, 28, 20, 38
 ];
 const ROUTE_MAIN_WIDTH = [
   'interpolate', ['linear'], ['zoom'],
-  10, 4,
-  14, 9,
-  16, 14,
-  17, 18,
-  18, 24,
-  20, 34
+  10, 5, 14, 10, 16, 15, 17, 19, 18, 25, 20, 35
+];
+const ROUTE_HIGHLIGHT_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 2, 14, 4, 16, 6, 17, 7, 18, 10, 20, 14
 ];
 
-// Mapbox GL JSのline-widthは太さ方向（線を横切る向き）のグラデーションを
-// サポートしないため、「中心が明るく外側ほど濃い」指定色は、太さの異なる
-// 単色の線を何重にも重ねることで近似する（内側ほど細く・明るい色を上に重ねる）。
-// 発光(グロー)効果も同様に、広く・薄い色の線を一番下に重ねて表現する。
-//
-// 注意：Mapboxのスタイル仕様では ["zoom"] を使った式（interpolate等）は
-// 他の式（["*", 係数, 式] など）の中に入れ子にできず、必ず独立したトップレベルの
-// interpolate式である必要がある。そのため「ズーム式を係数倍する」場合は、
-// ["*", 係数, interpolate式] ではなく、stopの値をあらかじめ係数倍した
-// 新しいinterpolate式を作る（実行時ではなく定義時に計算する）。
-function scaleWidth(baseExpr, factor) {
-  const [type, interpolation, zoomRef, ...stops] = baseExpr;
-  const scaledStops = [];
-  for (let i = 0; i < stops.length; i += 2) {
-    scaledStops.push(stops[i], stops[i + 1] * factor);
-  }
-  return [type, interpolation, zoomRef, ...scaledStops];
-}
-
 const ROUTE_COLORS = {
-  glow: 'rgba(85,255,51,0.35)',   // 指定のグロー効果
-  casing: '#007A00',              // 最外側の縁取り（濃緑）
-  outer: '#00C800',               // 外側の濃い部分
-  main: '#55FF33',                // メイン色（ルート中央）
-  highlight: '#B8FF9E'            // 中心色（明るい部分）
+  glow: '#66FF4A',
+  casing: '#006B18',
+  outer: '#00C72C',
+  main: '#42F238',
+  highlight: '#A6FF8D'
 };
 
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
-// 指定色を外側から順に、グロー(2重・幅広で淡く)→縁取り→外側の濃い緑→メイン→
-// 中心のハイライトの6層で重ねる。
+// グロー(2重)→縁取り→外側の濃い緑→メイン→中心のハイライトの6層で重ねる。
 export function drawRoute(map, geometry) {
   const data = { type: 'Feature', geometry };
   const source = map.getSource('route-line');
@@ -123,12 +109,12 @@ export function drawRoute(map, geometry) {
   map.addSource('route-line', { type: 'geojson', data });
 
   const layers = [
-    { id: 'route-line-glow-outer', color: ROUTE_COLORS.glow, width: scaleWidth(ROUTE_CASING_WIDTH, 1.8), opacity: 0.5 },
-    { id: 'route-line-glow-inner', color: ROUTE_COLORS.glow, width: scaleWidth(ROUTE_CASING_WIDTH, 1.3), opacity: 1 },
-    { id: 'route-line-casing', color: ROUTE_COLORS.casing, width: ROUTE_CASING_WIDTH, opacity: 1 },
-    { id: 'route-line-outer', color: ROUTE_COLORS.outer, width: scaleWidth(ROUTE_CASING_WIDTH, 0.75), opacity: 1 },
-    { id: 'route-line-main', color: ROUTE_COLORS.main, width: ROUTE_MAIN_WIDTH, opacity: 1 },
-    { id: 'route-line-highlight', color: ROUTE_COLORS.highlight, width: scaleWidth(ROUTE_MAIN_WIDTH, 0.35), opacity: 1 }
+    { id: 'route-line-glow-outer', color: ROUTE_COLORS.glow, width: ROUTE_GLOW_OUTER_WIDTH, opacity: 0.14 },
+    { id: 'route-line-glow-inner', color: ROUTE_COLORS.glow, width: ROUTE_GLOW_INNER_WIDTH, opacity: 0.24 },
+    { id: 'route-line-casing', color: ROUTE_COLORS.casing, width: ROUTE_CASING_WIDTH, opacity: 1.0 },
+    { id: 'route-line-outer', color: ROUTE_COLORS.outer, width: ROUTE_OUTER_WIDTH, opacity: 1.0 },
+    { id: 'route-line-main', color: ROUTE_COLORS.main, width: ROUTE_MAIN_WIDTH, opacity: 1.0 },
+    { id: 'route-line-highlight', color: ROUTE_COLORS.highlight, width: ROUTE_HIGHLIGHT_WIDTH, opacity: 0.9 }
   ];
 
   layers.forEach(({ id, color, width, opacity }) => {
