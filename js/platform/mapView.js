@@ -62,24 +62,36 @@ export function createUserMarker(map) {
 }
 
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
+// 白い縁取り(casing)を下に敷いてから鮮やかな線を重ねる。理由：昼/夜でベースマップの
+// 色調が変わるMapbox Standardスタイル上でも、単色の線だけだと道路や水域の色に
+// 埋もれて見えづらくなるため、縁取りでコントラストを確保する。
 export function drawRoute(map, geometry) {
+  const data = { type: 'Feature', geometry };
   const source = map.getSource('route-line');
   if (source) {
-    source.setData({ type: 'Feature', geometry });
+    source.setData(data);
     return;
   }
-  map.addSource('route-line', { type: 'geojson', data: { type: 'Feature', geometry } });
+  map.addSource('route-line', { type: 'geojson', data });
+  map.addLayer({
+    id: 'route-line-casing',
+    type: 'line',
+    source: 'route-line',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 }
+  });
   map.addLayer({
     id: 'route-line',
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#58a6ff', 'line-width': 5, 'line-opacity': 0.8 }
+    paint: { 'line-color': '#0a84ff', 'line-width': 6, 'line-opacity': 1 }
   });
 }
 
 export function clearRoute(map) {
   if (map.getLayer('route-line')) map.removeLayer('route-line');
+  if (map.getLayer('route-line-casing')) map.removeLayer('route-line-casing');
   if (map.getSource('route-line')) map.removeSource('route-line');
 }
 
