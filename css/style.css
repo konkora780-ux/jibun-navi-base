@@ -77,14 +77,34 @@ html, body {
   overflow-y: auto;
 }
 #destResults li {
-  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px 8px 10px;
   border-bottom: 1px solid #30363d;
   cursor: pointer;
 }
 #destResults li:last-child { border-bottom: none; }
 #destResults li:hover, #destResults li:active, #destResults li:focus { background: #21262d; outline: 2px solid #58a6ff; outline-offset: -2px; }
+#destResults .dr-text { flex: 1 1 auto; min-width: 0; }
 #destResults .dr-name { color: #e6edf3; font-size: 14px; }
 #destResults .dr-address { color: #8b949e; font-size: 12px; margin-top: 2px; }
+
+/* お気に入り星ボタン。タップ領域は44px確保しつつ、見た目のアイコン自体は小さくする */
+#destResults .dr-favorite {
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: none;
+  color: #8b949e;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+#destResults .dr-favorite.active { color: #d29922; }
+#destResults .dr-favorite:hover,
+#destResults .dr-favorite:focus { color: #d29922; outline: 2px solid #58a6ff; outline-offset: -2px; }
 
 #topbar button {
   background: #21262d;

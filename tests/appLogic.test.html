@@ -61,7 +61,7 @@ import { renderSmartLaneGuide } from '../js/ui/smartLaneGuide.js';
 import { pickTargetRoad } from '../js/core/models.js';
 import { resolveUpcomingRoadName, formatUpcomingRoadLabel } from '../js/core/formatNavigation.js';
 import { describeMapError, describeGpsAccuracyDegraded } from '../js/core/connectivityMessages.js';
-import { mergeIntoHistory } from '../js/log/destinationHistory.js';
+import { mergeIntoHistory, toggleInFavorites, excludeFavorites } from '../js/log/destinationHistory.js';
 
 const cases = [];
 function test(description, fn) {
@@ -828,6 +828,59 @@ test('mergeIntoHistory: 上限(maxLength)を超えたら古いものから切り
   const r = mergeIntoHistory(existing, { name: 'D' }, 3);
   assertEqual(r.length, 3, '上限3件を超えない');
   assertEqual(r.map((d) => d.name), ['D', 'A', 'B'], '新しいものが先頭、一番古い(C)が切り捨てられる');
+});
+
+test('toggleInFavorites: お気に入りに無い項目を渡すと先頭に追加される', () => {
+  const r = toggleInFavorites([{ name: 'A', address: 'a' }], { name: 'B', address: 'b' });
+  assertEqual(r.isFavorite, true, '追加後はお気に入り');
+  assertEqual(r.list.map((d) => d.name), ['B', 'A'], '先頭に追加される');
+});
+test('toggleInFavorites: 既にお気に入りの項目を渡すと取り除かれる', () => {
+  const existing = [{ name: 'A', address: 'a' }, { name: 'B', address: 'b' }];
+  const r = toggleInFavorites(existing, { name: 'A', address: 'a' });
+  assertEqual(r.isFavorite, false, '削除後はお気に入りではない');
+  assertEqual(r.list.map((d) => d.name), ['B'], 'Aが取り除かれる');
+});
+test('excludeFavorites: お気に入りに含まれる項目は履歴側から除外される', () => {
+  const favorites = [{ name: 'A', address: 'a' }];
+  const history = [{ name: 'A', address: 'a' }, { name: 'B', address: 'b' }];
+  const r = excludeFavorites(favorites, history);
+  assertEqual(r.map((d) => d.name), ['B'], 'お気に入りのAは除外される');
+});
+
+// ---------- destResultsView（お気に入り星ボタン） ----------
+test('renderDestResultItem: onToggleFavoriteを渡さない場合は星ボタンを表示しない（後方互換）', () => {
+  const li = renderDestResultItem({ name: 'X', address: 'x' }, () => {});
+  assertEqual(li.querySelector('.dr-favorite'), null, '星ボタンが無い');
+});
+test('renderDestResultItem: isFavorite=trueのとき星ボタンがactiveクラスと★を表示する', () => {
+  const li = renderDestResultItem({ name: 'X', address: 'x' }, () => {}, { isFavorite: true, onToggleFavorite: () => {} });
+  const star = li.querySelector('.dr-favorite');
+  assertEqual(star.classList.contains('active'), true, 'activeクラス');
+  assertEqual(star.textContent, '★', '★表示');
+  assertEqual(star.getAttribute('aria-pressed'), 'true', 'aria-pressed');
+});
+test('renderDestResultItem: 星ボタンをクリックしてもonSelect（目的地選択）は呼ばれない', () => {
+  const sandbox = document.getElementById('sandbox');
+  sandbox.innerHTML = '';
+  let selected = false;
+  let toggled = null;
+  const li = renderDestResultItem({ name: 'X', address: 'x' }, () => { selected = true; }, {
+    isFavorite: false, onToggleFavorite: (d) => { toggled = d; }
+  });
+  sandbox.appendChild(li);
+  li.querySelector('.dr-favorite').click();
+  assertEqual(toggled?.name, 'X', 'onToggleFavoriteが呼ばれる');
+  assertEqual(selected, false, 'onSelect（目的地選択）は呼ばれない');
+});
+test('renderDestResultItem: 施設名にHTML文字列が含まれても星ボタン付きでXSSにならない', () => {
+  const sandbox = document.getElementById('sandbox');
+  sandbox.innerHTML = '';
+  const malicious = { name: '<img src=x onerror="window.__xssFired3 = true">', address: 'a' };
+  const li = renderDestResultItem(malicious, () => {}, { isFavorite: false, onToggleFavorite: () => {} });
+  sandbox.appendChild(li);
+  assertEqual(sandbox.querySelectorAll('img').length, 0, 'imgタグが実体化していないこと');
+  assertEqual(window.__xssFired3, undefined, 'onerrorが発火していないこと');
 });
 
 // ---------- 実行 ----------

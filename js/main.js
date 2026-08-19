@@ -43,7 +43,9 @@ import {
 } from './core/connectivityMessages.js';
 import { renderDebugPanel } from './ui/debugPanel.js';
 import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
-import { recordDestinationUse, getHistory } from './log/destinationHistory.js';
+import {
+  recordDestinationUse, getHistory, toggleFavorite, isFavorite, getFavorites, excludeFavorites
+} from './log/destinationHistory.js';
 
 const dbg = {
   status: document.getElementById('dbgStatus'),
@@ -181,12 +183,29 @@ function selectDestination(r) {
   map.easeTo({ center: [r.lon, r.lat], zoom: Math.min(map.getZoom(), 14), duration: 600 });
 }
 
+let lastShownResults = [];
+
 function showDestResults(results) {
+  lastShownResults = results;
   destResults.innerHTML = '';
   results.forEach((r) => {
-    destResults.appendChild(renderDestResultItem(r, selectDestination));
+    destResults.appendChild(renderDestResultItem(r, selectDestination, {
+      isFavorite: isFavorite(r),
+      onToggleFavorite: handleToggleFavorite
+    }));
   });
   destResults.classList.remove('hidden');
+}
+
+function handleToggleFavorite(destination) {
+  toggleFavorite(destination);
+  // ★の状態を反映するため一覧を再描画する。入力欄が空（履歴/お気に入り表示中）
+  // なら並び替えを含めて組み直し、検索結果表示中ならそのままの並びで★だけ更新する。
+  if (destInput.value.trim() === '') {
+    showHistoryOrFavoritesIfInputEmpty();
+  } else {
+    showDestResults(lastShownResults);
+  }
 }
 
 btnSearch.addEventListener('click', async () => {
@@ -243,20 +262,23 @@ btnVoiceSearch.addEventListener('click', () => {
   });
 });
 
-// 入力欄が空のとき（未入力でタップした/全部消した）は、検索履歴を候補として出す。
-// 履歴はlocalStorageのみに保存され外部へは送信しない（log/destinationHistory.js）。
-function showHistoryIfInputEmpty() {
+// 入力欄が空のとき（未入力でタップした/全部消した）は、お気に入り→履歴の順に候補として出す
+// （お気に入りに入っている項目は履歴側には重複して出さない）。
+// どちらもlocalStorageのみに保存され外部へは送信しない（log/destinationHistory.js）。
+function showHistoryOrFavoritesIfInputEmpty() {
   if (destInput.value.trim() !== '') return;
-  const history = getHistory();
-  if (history.length > 0) showDestResults(history);
+  const favorites = getFavorites();
+  const history = excludeFavorites(favorites, getHistory());
+  const combined = [...favorites, ...history];
+  if (combined.length > 0) showDestResults(combined);
 }
 
-// 入力し直したら古い候補一覧は消す（空になった場合は履歴を表示し直す）
+// 入力し直したら古い候補一覧は消す（空になった場合はお気に入り/履歴を表示し直す）
 destInput.addEventListener('input', () => {
   hideDestResults();
-  showHistoryIfInputEmpty();
+  showHistoryOrFavoritesIfInputEmpty();
 });
-destInput.addEventListener('focus', showHistoryIfInputEmpty);
+destInput.addEventListener('focus', showHistoryOrFavoritesIfInputEmpty);
 // 候補以外をタップ/クリックしたら閉じる
 document.addEventListener('click', (e) => {
   if (!destResults.classList.contains('hidden') && !e.target.closest('#destWrap')) {

@@ -9,12 +9,19 @@
 /**
  * @param {{name:string, address:string}} result
  * @param {(result: object) => void} onSelect
+ * @param {{isFavorite?: boolean, onToggleFavorite?: (result: object) => void}} [options]
+ *   onToggleFavoriteを渡した場合のみ、お気に入り星ボタンを表示する。
  * @returns {HTMLLIElement}
  */
-export function renderDestResultItem(result, onSelect) {
+export function renderDestResultItem(result, onSelect, options = {}) {
+  const { isFavorite = false, onToggleFavorite = null } = options;
+
   const li = document.createElement('li');
   li.setAttribute('role', 'option');
   li.tabIndex = 0;
+
+  const textWrap = document.createElement('div');
+  textWrap.className = 'dr-text';
 
   const nameEl = document.createElement('div');
   nameEl.className = 'dr-name';
@@ -24,8 +31,27 @@ export function renderDestResultItem(result, onSelect) {
   addrEl.className = 'dr-address';
   addrEl.textContent = result.address;
 
-  li.appendChild(nameEl);
-  li.appendChild(addrEl);
+  textWrap.appendChild(nameEl);
+  textWrap.appendChild(addrEl);
+  li.appendChild(textWrap);
+
+  if (onToggleFavorite) {
+    const starBtn = document.createElement('button');
+    starBtn.type = 'button';
+    starBtn.className = 'dr-favorite' + (isFavorite ? ' active' : '');
+    starBtn.setAttribute('aria-label', isFavorite ? 'お気に入りから外す' : 'お気に入りに追加');
+    starBtn.setAttribute('aria-pressed', String(isFavorite));
+    starBtn.textContent = isFavorite ? '★' : '☆';
+    // liのクリック/Enter/Space（onSelect）と衝突しないよう、click・keydownの両方で止める。
+    starBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      onToggleFavorite(result);
+    });
+    starBtn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
+    });
+    li.appendChild(starBtn);
+  }
 
   li.addEventListener('click', () => onSelect(result));
   li.addEventListener('keydown', (e) => {
