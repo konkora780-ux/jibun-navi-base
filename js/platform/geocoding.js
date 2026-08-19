@@ -1,9 +1,14 @@
 /**
- * platform/geocoding.js — 目的地検索（Mapbox Geocoding API v6, forward）
+ * platform/geocoding.js — 目的地検索（Mapbox Search Box API, forward）
  * 検索ボタンを押した時だけ呼ぶこと（入力1文字ごとに呼ばない。課金事故防止）。
+ *
+ * Geocoding API v6ではなくSearch Box APIを使う。理由：
+ * Geocoding v6はPOI（駅・コンビニ・施設名など）を返さず、住所・地名しか検索できない
+ * （実際に「北上駅」で検索すると「北上市」しか返らなかった）。
+ * 実機検証で確認済み：Search Box APIの/forwardエンドポイントならPOI名で正しく検索できる。
  */
 
-const GEOCODING_BASE = 'https://api.mapbox.com/search/geocode/v6/forward';
+const SEARCH_BOX_BASE = 'https://api.mapbox.com/search/searchbox/v1/forward';
 
 /**
  * @param {{query:string, token:string, proximity?:{lat:number,lon:number}}} args
@@ -19,9 +24,9 @@ export async function searchDestination({ query, token, proximity = null }) {
   });
   if (proximity) params.set('proximity', `${proximity.lon},${proximity.lat}`);
 
-  const res = await fetch(`${GEOCODING_BASE}?${params.toString()}`);
+  const res = await fetch(`${SEARCH_BOX_BASE}?${params.toString()}`);
   if (!res.ok) {
-    throw new Error(`Geocoding APIエラー: HTTP ${res.status}`);
+    throw new Error(`目的地検索エラー: HTTP ${res.status}`);
   }
   const data = await res.json();
 
