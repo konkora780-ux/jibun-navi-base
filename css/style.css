@@ -38,7 +38,33 @@ html, body {
   padding: 8px;
   font-size: 15px;
 }
-#destInput { flex: 1 1 auto; min-width: 80px; }
+#destWrap { position: relative; flex: 1 1 auto; min-width: 80px; }
+#destInput { width: 100%; }
+
+.hidden { display: none; }
+
+#destResults {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  list-style: none;
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+#destResults li {
+  padding: 8px 10px;
+  border-bottom: 1px solid #30363d;
+  cursor: pointer;
+}
+#destResults li:last-child { border-bottom: none; }
+#destResults li:hover, #destResults li:active { background: #21262d; }
+#destResults .dr-name { color: #e6edf3; font-size: 14px; }
+#destResults .dr-address { color: #8b949e; font-size: 12px; margin-top: 2px; }
 
 #topbar button {
   background: #21262d;

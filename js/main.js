@@ -133,6 +133,29 @@ const btnSearch = document.getElementById('btnSearch');
 const testRouteSelect = document.getElementById('testRouteId');
 let selectedDestination = null;
 
+const destResults = document.getElementById('destResults');
+
+function hideDestResults() {
+  destResults.classList.add('hidden');
+  destResults.innerHTML = '';
+}
+
+function showDestResults(results) {
+  destResults.innerHTML = '';
+  results.forEach((r) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<div class="dr-name">${r.name}</div><div class="dr-address">${r.address}</div>`;
+    li.addEventListener('click', () => {
+      selectedDestination = r;
+      destInput.value = `${r.name}（${r.address}）`;
+      setStatus(`目的地を設定: ${r.name}`);
+      hideDestResults();
+    });
+    destResults.appendChild(li);
+  });
+  destResults.classList.remove('hidden');
+}
+
 btnSearch.addEventListener('click', async () => {
   const query = destInput.value.trim();
   if (!query) return;
@@ -146,16 +169,24 @@ btnSearch.addEventListener('click', async () => {
     });
     if (results.length === 0) {
       setStatus('検索結果が見つかりません', true);
+      hideDestResults();
       return;
     }
-    // Phase 1は測定装置に徹するため、候補一覧UIは作らず先頭候補を採用する。
-    selectedDestination = results[0];
-    destInput.value = `${selectedDestination.name}（${selectedDestination.address}）`;
-    setStatus(`目的地を設定: ${selectedDestination.name}`);
+    showDestResults(results);
+    setStatus(`候補${results.length}件から目的地を選んでください`);
   } catch (err) {
     setStatus(`検索エラー: ${err.message}`, true);
   } finally {
     btnSearch.disabled = false;
+  }
+});
+
+// 入力し直したら古い候補一覧は消す
+destInput.addEventListener('input', hideDestResults);
+// 候補以外をタップ/クリックしたら閉じる
+document.addEventListener('click', (e) => {
+  if (!destResults.classList.contains('hidden') && !e.target.closest('#destWrap')) {
+    hideDestResults();
   }
 });
 

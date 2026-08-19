@@ -27,7 +27,10 @@
 
   <!-- 上部バー -->
   <header id="topbar">
-    <input id="destInput" type="text" placeholder="目的地を検索">
+    <div id="destWrap">
+      <input id="destInput" type="text" placeholder="目的地を検索">
+      <ul id="destResults" class="hidden"></ul>
+    </div>
     <button id="btnSearch">検索</button>
     <button id="btnStart" class="toggle">ナビ開始</button>
     <button id="btnRecenter" class="toggle" title="現在地に戻る">現在地</button>
