@@ -1,0 +1,35 @@
+{
+  "id": 13,
+  "description": "GPS精度20m（Confidenceを1段階下げる）。Case12/14と道路条件は同一でgpsAccuracyのみ違う",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": {
+      "name": "県道1号",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "secondary"
+    },
+    "followingManeuver": { "type": "continue", "modifier": "straight", "isJunction": false },
+    "distanceToFollowing": 200,
+    "currentSpeed": 10,
+    "gpsAccuracy": 20
+  },
+  "expected": {
+    "confidence": "medium",
+    "targetRoad": "next",
+    "recommendedLanes": [0],
+    "gpsDowngraded": true
+  }
+}

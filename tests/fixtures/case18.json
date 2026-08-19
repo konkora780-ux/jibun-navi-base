@@ -1,0 +1,28 @@
+{
+  "id": 18,
+  "description": "Mapbox isActiveとSmartLane推奨が異なる → recommendationMatched: different",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["left"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight", "right"], "isValid": true, "isActive": true }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": null,
+    "followingManeuver": { "type": "turn", "modifier": "left", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 10,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "targetRoad": "current",
+    "recommendedLanes": [0],
+    "recommendationMatched": "different"
+  }
+}

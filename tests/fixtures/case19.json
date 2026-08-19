@@ -1,0 +1,27 @@
+{
+  "id": 19,
+  "description": "Mapbox側のactive情報なし → recommendationMatched: unavailable",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": null,
+    "followingManeuver": { "type": "continue", "modifier": "straight", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 12,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "targetRoad": "current",
+    "recommendedLanes": [1],
+    "recommendationMatched": "unavailable"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "id": 11,
+  "description": "右折後4車線、次々が左折。左端はisValid:false（仕様書の具体例そのもの）",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["right"], "isValid": true, "isActive": false },
+        { "indications": ["right"], "isValid": true, "isActive": true }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": {
+      "name": "県道1号",
+      "lanes": [
+        { "indications": ["left"], "isValid": false, "isActive": false },
+        { "indications": ["left", "straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["right"], "isValid": false, "isActive": false }
+      ],
+      "roadClass": "secondary"
+    },
+    "followingManeuver": { "type": "turn", "modifier": "left", "isJunction": false },
+    "distanceToFollowing": 200,
+    "currentSpeed": 15,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "high",
+    "targetRoad": "next",
+    "recommendedLanes": [1]
+  }
+}

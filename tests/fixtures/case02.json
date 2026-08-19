@@ -1,0 +1,19 @@
+{
+  "id": 2,
+  "description": "1車線のみ",
+  "input": {
+    "currentRoad": {
+      "name": "市道",
+      "lanes": [{ "indications": ["straight"], "isValid": true, "isActive": true }],
+      "roadClass": "street"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 200,
+    "nextRoad": null,
+    "followingManeuver": null,
+    "distanceToFollowing": null,
+    "currentSpeed": 10,
+    "gpsAccuracy": 5
+  },
+  "expected": { "confidence": "unknown", "recommendedLanes": [] }
+}

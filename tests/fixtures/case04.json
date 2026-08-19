@@ -1,0 +1,27 @@
+{
+  "id": 4,
+  "description": "左折後しばらく直進（幅のある案内）",
+  "input": {
+    "currentRoad": {
+      "name": "市道",
+      "lanes": [
+        { "indications": ["left", "straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "street"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "left", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": null,
+    "followingManeuver": { "type": "continue", "modifier": "straight", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 12,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "medium",
+    "targetRoad": "current",
+    "recommendedLanes": [0, 1]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "id": 3,
+  "description": "右折後すぐ左折・4車線・全車線valid",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["right"], "isValid": true, "isActive": false },
+        { "indications": ["right"], "isValid": true, "isActive": true },
+        { "indications": ["right"], "isValid": true, "isActive": false },
+        { "indications": ["right"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": {
+      "name": "県道1号",
+      "lanes": [
+        { "indications": ["left", "straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "secondary"
+    },
+    "followingManeuver": { "type": "turn", "modifier": "left", "isJunction": false },
+    "distanceToFollowing": 150,
+    "currentSpeed": 15,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "high",
+    "targetRoad": "next",
+    "recommendedLanes": [0],
+    "gpsDowngraded": false
+  }
+}

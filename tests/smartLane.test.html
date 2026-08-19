@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>SmartLane テスト（Step7・全20ケース）</title>
+<style>
+  body { background:#0d1117; color:#e6edf3; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; padding:20px; }
+  h1 { font-size:18px; }
+  #summary { font-size:16px; margin:12px 0; padding:10px; border-radius:6px; }
+  #summary.pass { background:#1a3a1a; color:#3fb950; }
+  #summary.fail { background:#3a1a1a; color:#f85149; }
+  table { border-collapse:collapse; width:100%; font-size:13px; }
+  th, td { border:1px solid #30363d; padding:6px 8px; text-align:left; vertical-align:top; }
+  th { background:#161b22; }
+  tr.pass td.result { color:#3fb950; }
+  tr.fail td.result { color:#f85149; font-weight:bold; }
+  td.detail { white-space:pre-wrap; font-family:monospace; font-size:12px; color:#8b949e; }
+</style>
+</head>
+<body>
+
+<h1>SmartLane テスト（docs/01_SmartLane仕様.md 7節・全20ケース）</h1>
+<div id="summary">実行中…</div>
+<table id="resultTable">
+  <thead>
+    <tr><th>#</th><th>内容</th><th>結果</th><th>詳細</th></tr>
+  </thead>
+  <tbody id="resultBody"></tbody>
+</table>
+
+<script type="module">
+import { createRoadSnapshot, createManeuverInfo, createSmartLaneInput } from '../js/core/models.js';
+import { evaluateSmartLane } from '../js/core/smartLane.js';
+import { compareRecommendation } from '../js/core/compare.js';
+
+const CASE_COUNT = 20;
+
+function buildInput(raw) {
+  const currentRoad = createRoadSnapshot(raw.currentRoad);
+  const currentManeuver = raw.currentManeuver ? createManeuverInfo(raw.currentManeuver) : null;
+  const nextRoad = raw.nextRoad ? createRoadSnapshot(raw.nextRoad) : null;
+  const followingManeuver = raw.followingManeuver ? createManeuverInfo(raw.followingManeuver) : null;
+
+  return createSmartLaneInput({
+    currentRoad,
+    currentManeuver,
+    distanceToCurrent: raw.distanceToCurrent,
+    nextRoad,
+    followingManeuver,
+    distanceToFollowing: raw.distanceToFollowing,
+    currentSpeed: raw.currentSpeed,
+    gpsAccuracy: raw.gpsAccuracy
+  });
+}
+
+function activeIndicesOf(roadSnapshot) {
+  if (!roadSnapshot?.lanes) return [];
+  return roadSnapshot.lanes
+    .map((lane, i) => (lane.isActive ? i : null))
+    .filter((i) => i !== null);
+}
+
+function arraysEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b) || a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((v, i) => v === sb[i]);
+}
+
+function checkCase(fixture) {
+  const problems = [];
+  let input;
+  try {
+    input = buildInput(fixture.input);
+  } catch (err) {
+    return { pass: false, problems: [`入力データの構築に失敗: ${err.message}`], advice: null };
+  }
+
+  let advice;
+  try {
+    advice = evaluateSmartLane(input);
+  } catch (err) {
+    return { pass: false, problems: [`evaluateSmartLaneが例外を投げた: ${err.message}`], advice: null };
+  }
+
+  const exp = fixture.expected;
+
+  if (exp.confidence !== undefined && advice.confidence !== exp.confidence) {
+    problems.push(`confidence: expected=${exp.confidence} actual=${advice.confidence}`);
+  }
+  if (exp.confidenceOneOf !== undefined && !exp.confidenceOneOf.includes(advice.confidence)) {
+    problems.push(`confidence: expected one of ${JSON.stringify(exp.confidenceOneOf)} actual=${advice.confidence}`);
+  }
+  if (exp.targetRoad !== undefined && advice.targetRoad !== exp.targetRoad) {
+    problems.push(`targetRoad: expected=${exp.targetRoad} actual=${advice.targetRoad}`);
+  }
+  if (exp.recommendedLanes !== undefined && !arraysEqual(advice.recommendedLanes, exp.recommendedLanes)) {
+    problems.push(`recommendedLanes: expected=${JSON.stringify(exp.recommendedLanes)} actual=${JSON.stringify(advice.recommendedLanes)}`);
+  }
+  if (exp.gpsDowngraded !== undefined && advice.gpsDowngraded !== exp.gpsDowngraded) {
+    problems.push(`gpsDowngraded: expected=${exp.gpsDowngraded} actual=${advice.gpsDowngraded}`);
+  }
+  if (exp.recommendationMatched !== undefined) {
+    const mapboxActive = activeIndicesOf(advice.targetRoad === 'next' ? input.nextRoad : input.currentRoad);
+    const matched = compareRecommendation(mapboxActive, advice.recommendedLanes);
+    if (matched !== exp.recommendationMatched) {
+      problems.push(`recommendationMatched: expected=${exp.recommendationMatched} actual=${matched} (mapboxActive=${JSON.stringify(mapboxActive)})`);
+    }
+  }
+
+  return { pass: problems.length === 0, problems, advice };
+}
+
+async function run() {
+  const body = document.getElementById('resultBody');
+  let passCount = 0;
+
+  for (let i = 1; i <= CASE_COUNT; i++) {
+    const id = String(i).padStart(2, '0');
+    const res = await fetch(`fixtures/case${id}.json`);
+    const fixture = await res.json();
+    const result = checkCase(fixture);
+
+    if (result.pass) passCount++;
+
+    const tr = document.createElement('tr');
+    tr.className = result.pass ? 'pass' : 'fail';
+    tr.innerHTML = `
+      <td>${fixture.id}</td>
+      <td>${fixture.description}</td>
+      <td class="result">${result.pass ? 'PASS' : 'FAIL'}</td>
+      <td class="detail">${result.pass
+        ? JSON.stringify({ confidence: result.advice.confidence, targetRoad: result.advice.targetRoad, recommendedLanes: result.advice.recommendedLanes })
+        : result.problems.join('\n')}</td>
+    `;
+    body.appendChild(tr);
+  }
+
+  const summary = document.getElementById('summary');
+  summary.textContent = `${passCount} / ${CASE_COUNT} 件パス`;
+  summary.className = passCount === CASE_COUNT ? 'pass' : 'fail';
+}
+
+run();
+</script>
+</body>
+</html>

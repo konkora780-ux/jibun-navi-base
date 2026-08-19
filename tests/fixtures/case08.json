@@ -1,0 +1,26 @@
+{
+  "id": 8,
+  "description": "高速出口（左側通行）",
+  "input": {
+    "currentRoad": {
+      "name": "東北自動車道",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight", "slight right"], "isValid": true, "isActive": true }
+      ],
+      "roadClass": "motorway"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 200,
+    "nextRoad": null,
+    "followingManeuver": { "type": "off ramp", "modifier": "slight right", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 15,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "targetRoad": "current",
+    "recommendedLanes": [0]
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "id": 10,
+  "description": "Uターン（明確な根拠が無いためisActive優先にフォールバック）",
+  "input": {
+    "currentRoad": {
+      "name": "市道",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight", "uturn"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "street"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 100,
+    "nextRoad": null,
+    "followingManeuver": { "type": "turn", "modifier": "uturn", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 8,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "targetRoad": "current",
+    "recommendedLanes": [1]
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "id": 6,
+  "description": "曲がった先の車線データのみ無し（現在道路の案内だけ）",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["left"], "isValid": false, "isActive": false },
+        { "indications": ["straight", "right"], "isValid": true, "isActive": true },
+        { "indications": ["right"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": null,
+    "followingManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 12,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "medium",
+    "targetRoad": "current",
+    "recommendedLanes": [2]
+  }
+}

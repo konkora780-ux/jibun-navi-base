@@ -1,0 +1,34 @@
+{
+  "id": 5,
+  "description": "次々の曲がり方が不明",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["right"], "isValid": true, "isActive": false },
+        { "indications": ["right"], "isValid": true, "isActive": true },
+        { "indications": ["right"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": {
+      "name": "県道1号",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "secondary"
+    },
+    "followingManeuver": null,
+    "distanceToFollowing": null,
+    "currentSpeed": 12,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "medium",
+    "targetRoad": "next",
+    "recommendedLanes": [0]
+  }
+}

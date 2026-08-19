@@ -1,0 +1,26 @@
+{
+  "id": 9,
+  "description": "JCT分岐",
+  "input": {
+    "currentRoad": {
+      "name": "東北自動車道",
+      "lanes": [
+        { "indications": ["straight", "slight left"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "motorway"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 500,
+    "nextRoad": null,
+    "followingManeuver": { "type": "fork", "modifier": "slight left", "isJunction": true },
+    "distanceToFollowing": null,
+    "currentSpeed": 20,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "targetRoad": "current",
+    "recommendedLanes": [0]
+  }
+}

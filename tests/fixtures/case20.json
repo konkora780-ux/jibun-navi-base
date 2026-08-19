@@ -1,0 +1,27 @@
+{
+  "id": 20,
+  "description": "交差点間距離が非常に短く車線変更距離が極端に不足（独自案内を出さない）",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["left"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight", "right"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 50,
+    "nextRoad": null,
+    "followingManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 20,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "low",
+    "recommendedLanes": []
+  }
+}

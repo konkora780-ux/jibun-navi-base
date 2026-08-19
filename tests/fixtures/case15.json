@@ -1,0 +1,29 @@
+{
+  "id": 15,
+  "description": "5〜6車線道路で次々が右折（有効車線の中で右寄りを選択）",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight", "right"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "straight", "isJunction": false },
+    "distanceToCurrent": 300,
+    "nextRoad": null,
+    "followingManeuver": { "type": "turn", "modifier": "right", "isJunction": false },
+    "distanceToFollowing": null,
+    "currentSpeed": 15,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "targetRoad": "current",
+    "recommendedLanes": [5]
+  }
+}

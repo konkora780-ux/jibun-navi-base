@@ -1,0 +1,35 @@
+{
+  "id": 7,
+  "description": "車線変更距離が足りない（Confidence降格）",
+  "input": {
+    "currentRoad": {
+      "name": "国道4号",
+      "lanes": [
+        { "indications": ["left"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight"], "isValid": true, "isActive": false },
+        { "indications": ["straight", "right"], "isValid": true, "isActive": true }
+      ],
+      "roadClass": "primary"
+    },
+    "currentManeuver": { "type": "turn", "modifier": "left", "isJunction": false },
+    "distanceToCurrent": 120,
+    "nextRoad": {
+      "name": "県道1号",
+      "lanes": [
+        { "indications": ["left", "straight"], "isValid": true, "isActive": true },
+        { "indications": ["straight"], "isValid": true, "isActive": false }
+      ],
+      "roadClass": "secondary"
+    },
+    "followingManeuver": { "type": "turn", "modifier": "left", "isJunction": false },
+    "distanceToFollowing": 200,
+    "currentSpeed": 20,
+    "gpsAccuracy": 5
+  },
+  "expected": {
+    "confidence": "medium",
+    "targetRoad": "next",
+    "recommendedLanes": [0]
+  }
+}
