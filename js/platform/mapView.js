@@ -84,9 +84,7 @@ const ROUTE_CASING_WIDTH = [
 ];
 
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
-// 濃い縁取り(casing)を下に敷いてから蛍光イエローグリーンを重ねる。理由：昼/夜でベースマップの
-// 色調が変わるMapbox Standardスタイル上でも、単色の線だけだと道路や水域の色に
-// 埋もれて見えづらくなるため、縁取りでコントラストを確保する。
+// 薄い黄緑の縁取り(casing)を下に敷いてから、濃い緑の線を重ねる（一般的なカーナビの配色）。
 export function drawRoute(map, geometry) {
   const data = { type: 'Feature', geometry };
   const source = map.getSource('route-line');
@@ -100,14 +98,14 @@ export function drawRoute(map, geometry) {
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#0d1117', 'line-width': ROUTE_CASING_WIDTH, 'line-opacity': 0.9 }
+    paint: { 'line-color': '#a3e8b0', 'line-width': ROUTE_CASING_WIDTH, 'line-opacity': 0.9 }
   });
   map.addLayer({
     id: 'route-line',
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#ccff00', 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': 1 }
+    paint: { 'line-color': '#22c55e', 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': 1 }
   });
 }
 
