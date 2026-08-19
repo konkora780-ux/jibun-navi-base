@@ -61,6 +61,28 @@ export function createUserMarker(map) {
   };
 }
 
+// ズームレベルに応じて線幅を変える式。道路そのものを塗りつぶすくらいの太さになるよう、
+// ズームが上がる（拡大する）ほど太くする。値はナビ標準ズーム(config.js MAP_FOLLOW.ZOOM=17)
+// 付近で道路一本分くらいを覆う太さを目安に調整している。
+const ROUTE_LINE_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 4,
+  14, 9,
+  16, 14,
+  17, 18,
+  18, 24,
+  20, 34
+];
+const ROUTE_CASING_WIDTH = [
+  'interpolate', ['linear'], ['zoom'],
+  10, 7,
+  14, 13,
+  16, 19,
+  17, 24,
+  18, 31,
+  20, 42
+];
+
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
 // 濃い縁取り(casing)を下に敷いてから蛍光イエローグリーンを重ねる。理由：昼/夜でベースマップの
 // 色調が変わるMapbox Standardスタイル上でも、単色の線だけだと道路や水域の色に
@@ -78,14 +100,14 @@ export function drawRoute(map, geometry) {
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#0d1117', 'line-width': 9, 'line-opacity': 0.9 }
+    paint: { 'line-color': '#0d1117', 'line-width': ROUTE_CASING_WIDTH, 'line-opacity': 0.9 }
   });
   map.addLayer({
     id: 'route-line',
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#ccff00', 'line-width': 6, 'line-opacity': 1 }
+    paint: { 'line-color': '#ccff00', 'line-width': ROUTE_LINE_WIDTH, 'line-opacity': 1 }
   });
 }
 
