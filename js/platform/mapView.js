@@ -62,7 +62,7 @@ export function createUserMarker(map) {
 }
 
 // ルート線の描画（Step9で取得したルートを地図上に表示する）。
-// 白い縁取り(casing)を下に敷いてから鮮やかな線を重ねる。理由：昼/夜でベースマップの
+// 濃い縁取り(casing)を下に敷いてから蛍光イエローグリーンを重ねる。理由：昼/夜でベースマップの
 // 色調が変わるMapbox Standardスタイル上でも、単色の線だけだと道路や水域の色に
 // 埋もれて見えづらくなるため、縁取りでコントラストを確保する。
 export function drawRoute(map, geometry) {
@@ -78,14 +78,14 @@ export function drawRoute(map, geometry) {
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.9 }
+    paint: { 'line-color': '#0d1117', 'line-width': 9, 'line-opacity': 0.9 }
   });
   map.addLayer({
     id: 'route-line',
     type: 'line',
     source: 'route-line',
     layout: { 'line-join': 'round', 'line-cap': 'round' },
-    paint: { 'line-color': '#0a84ff', 'line-width': 6, 'line-opacity': 1 }
+    paint: { 'line-color': '#ccff00', 'line-width': 6, 'line-opacity': 1 }
   });
 }
 

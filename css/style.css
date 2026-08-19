@@ -11,23 +11,43 @@ html, body {
   -webkit-text-size-adjust: 100%;
 }
 
+/* Phase 2：地図を常時全画面にし、他のUIはその上に浮かせる（フローティングUI）。
+   実際のカーナビと同じく、検索バー・操作ボタン・デバッグパネル・案内バーは
+   すべて#mapの上に重ねて表示する。#appはその位置基準(position:relative)にする。 */
 #app {
-  display: flex;
-  flex-direction: column;
+  position: relative;
   height: 100%;
-  padding: env(safe-area-inset-top) env(safe-area-inset-right)
-           env(safe-area-inset-bottom) env(safe-area-inset-left);
+  width: 100%;
+  overflow: hidden;
+}
+
+#map {
+  position: absolute;
+  inset: 0;
+}
+
+/* フローティングパネル共通の見た目（半透明＋ぼかし＋影） */
+#topbar, #debugPanel, #guidebar {
+  position: absolute;
+  z-index: 30;
+  background: rgba(22, 27, 34, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(48, 54, 61, 0.9);
+  border-radius: 12px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
 }
 
 /* ---------- 上部バー ---------- */
 #topbar {
+  top: calc(env(safe-area-inset-top) + 10px);
+  left: calc(env(safe-area-inset-left) + 10px);
+  right: calc(env(safe-area-inset-right) + 10px);
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
   padding: 8px;
-  background: #161b22;
-  border-bottom: 1px solid #30363d;
-  flex: 0 0 auto;
 }
 
 #topbar input, #topbar select {
@@ -79,16 +99,14 @@ html, body {
 #topbar button:disabled { opacity: .4; }
 #topbar button.toggle.active { background: #1f6feb; border-color: #1f6feb; }
 
-/* ---------- 本体 ---------- */
-#main { flex: 1 1 auto; display: flex; min-height: 0; }
-
-#map { flex: 1 1 auto; height: 100%; }
-
+/* ---------- DEBUGパネル ---------- */
 #debugPanel {
-  flex: 0 0 260px;
+  top: calc(env(safe-area-inset-top) + 66px);
+  right: calc(env(safe-area-inset-right) + 10px);
+  bottom: calc(env(safe-area-inset-bottom) + 68px);
+  z-index: 20;
+  width: min(260px, calc(100vw - 20px));
   overflow-y: auto;
-  background: #161b22;
-  border-left: 1px solid #30363d;
   padding: 8px 10px;
   font-size: 13px;
 }
@@ -139,10 +157,10 @@ html, body {
 
 /* ---------- 下部の案内バー ---------- */
 #guidebar {
-  flex: 0 0 auto;
-  padding: 10px 12px;
-  background: #161b22;
-  border-top: 1px solid #30363d;
+  left: calc(env(safe-area-inset-left) + 10px);
+  right: calc(env(safe-area-inset-right) + 10px);
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  padding: 10px 14px;
   display: flex;
   gap: 14px;
   align-items: baseline;
@@ -159,8 +177,7 @@ html, body {
   border: 1px solid #0d1117;
 }
 
-/* 縦画面のときはデバッグパネルを下に回す */
+/* 縦画面のときはデバッグパネルを画面幅に合わせて狭くする */
 @media (orientation: portrait) {
-  #main { flex-direction: column; }
-  #debugPanel { flex: 0 0 40%; border-left: none; border-top: 1px solid #30363d; }
+  #debugPanel { width: min(220px, calc(100vw - 20px)); }
 }
