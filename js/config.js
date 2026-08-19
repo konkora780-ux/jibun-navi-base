@@ -9,7 +9,7 @@
 // ============================================================
 // Mapbox
 // ============================================================
-export const MAPBOX_TOKEN = 'pk.ここに自分のトークンを貼る';
+export const MAPBOX_TOKEN = 'pk.eyJ1Ijoia29uY2hhbjA1MTkiLCJhIjoiY21zemQ3a21rMDNwOTJ5cHd5MW8yYzBwbCJ9.DvNeszP-qNtMpk0XQqa97w';
 
 export const MAP_STYLE = 'mapbox://styles/mapbox/standard';
 
