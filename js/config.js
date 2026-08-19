@@ -98,3 +98,28 @@ export const MAP_FOLLOW = {
 export const TERRAIN = {
   EXAGGERATION: 1.2
 };
+
+// ============================================================
+// 設定画面（settings.html）の上書き値をここで反映する。
+// 上のexport constはオブジェクトなので、中身だけをObject.assignで書き換える。
+// こうすることで、他のファイルは今まで通り import して使うだけでよく、
+// 設定画面のために各ファイルを書き換える必要が無くなる。
+// 反映は「ページの読み込み時」のみ（設定画面で保存した後、ナビ画面を再読み込みする必要がある）。
+// ============================================================
+export const SETTINGS_STORAGE_KEY = 'jibunnavi_base_settings_v1';
+
+export const SETTABLE_GROUPS = {
+  GPS_ACCURACY, LANE_CHANGE, REROUTE, MAP_FOLLOW, TERRAIN, SMART_LANE_ENABLED_ROAD_CLASSES
+};
+
+try {
+  const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+  if (raw) {
+    const overrides = JSON.parse(raw);
+    Object.entries(overrides).forEach(([groupName, values]) => {
+      if (SETTABLE_GROUPS[groupName]) Object.assign(SETTABLE_GROUPS[groupName], values);
+    });
+  }
+} catch (err) {
+  console.warn('設定の読み込みに失敗、初期値を使います:', err.message);
+}

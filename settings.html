@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>じぶんNaviベース - 設定</title>
+<style>
+  body { background:#0d1117; color:#e6edf3; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; padding:16px; max-width:520px; margin:0 auto; }
+  h1 { font-size:18px; }
+  h2 { font-size:14px; color:#58a6ff; margin-top:22px; margin-bottom:8px; }
+  p.desc { color:#8b949e; font-size:12px; margin:2px 0 10px; }
+  .field { display:flex; justify-content:space-between; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid #21262d; }
+  .field label { font-size:14px; }
+  .field .unit { color:#8b949e; font-size:12px; margin-left:4px; }
+  input[type="number"] {
+    width:90px; background:#161b22; color:#e6edf3; border:1px solid #30363d;
+    border-radius:6px; padding:6px 8px; font-size:14px; text-align:right;
+  }
+  input[type="checkbox"] { width:20px; height:20px; }
+  #actions { display:flex; gap:8px; margin-top:24px; flex-wrap:wrap; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:10px 14px; font-size:14px; cursor:pointer; }
+  #btnSave { background:#1f6feb; border-color:#1f6feb; }
+  #note { margin-top:16px; padding:10px; background:#161b22; border:1px solid #30363d; border-radius:8px; font-size:13px; color:#d29922; }
+  #savedMsg { color:#3fb950; font-size:13px; margin-top:10px; display:none; }
+</style>
+</head>
+<body>
+
+<h1>じぶんNaviベース - 設定</h1>
+<p class="desc">車を実際に走らせた結果を見ながら、しきい値を調整するための画面です。値の意味が分からない場合は初期値のままで問題ありません。</p>
+
+<div id="form"></div>
+
+<div id="actions">
+  <button id="btnSave">保存する</button>
+  <button id="btnReset">初期値に戻す</button>
+</div>
+<div id="savedMsg">保存しました。ナビ画面（index.html）を再読み込みすると反映されます。</div>
+
+<div id="note">
+  ⚠ 「再ルートの最短間隔」は10秒未満にしないでください。短くしすぎるとMapbox APIの呼び出しが増えすぎて、思わぬ課金が発生する恐れがあります。
+</div>
+
+<script type="module">
+import { SETTABLE_GROUPS, SETTINGS_STORAGE_KEY, ROAD_CLASSES } from './js/config.js';
+
+const ROAD_CLASS_LABEL = {
+  motorway: '高速道路', trunk: '幹線道路', primary: '主要道路',
+  secondary: '一般道路(2級)', street: '一般道路・その他', unknown: '不明'
+};
+
+// フィールド定義：どのグループ・キーを、どんなラベル・単位・step・minで編集させるか
+const FIELD_GROUPS = [
+  {
+    title: 'GPS精度のしきい値',
+    desc: 'この精度(誤差の半径)より良ければ通常判定、悪ければ独自車線案内を弱める・止める。',
+    group: 'GPS_ACCURACY',
+    fields: [
+      { key: 'GOOD', label: '良好とみなす精度', unit: 'm', step: 1, min: 1 },
+      { key: 'DEGRADED', label: 'これを超えたら案内停止', unit: 'm', step: 1, min: 1 }
+    ]
+  },
+  {
+    title: '車線変更の余裕',
+    desc: '車線変更にかかる時間の見積りと、案内を止める距離の割合。',
+    group: 'LANE_CHANGE',
+    fields: [
+      { key: 'SECONDS_PER_CHANGE', label: '1回の車線変更にかかる秒数', unit: '秒', step: 0.5, min: 0.5 },
+      { key: 'CRITICAL_RATIO', label: '案内を止める距離の割合', unit: '(0〜1)', step: 0.05, min: 0.1, max: 1 }
+    ]
+  },
+  {
+    title: 'ルート逸脱・再ルート',
+    desc: '再ルートの最短間隔は必ず10秒以上にしてください（課金事故防止）。',
+    group: 'REROUTE',
+    fields: [
+      { key: 'OFF_ROUTE_METERS', label: '逸脱とみなす距離', unit: 'm', step: 5, min: 5 },
+      { key: 'OFF_ROUTE_SECONDS', label: '逸脱継続とみなす秒数', unit: '秒', step: 1, min: 1 },
+      { key: 'MIN_INTERVAL_SECONDS', label: '再ルートの最短間隔', unit: '秒', step: 1, min: 10 }
+    ]
+  },
+  {
+    title: '地図の追従',
+    desc: 'ナビ中に地図が自車位置を追いかける挙動の設定。',
+    group: 'MAP_FOLLOW',
+    fields: [
+      { key: 'ZOOM', label: '追従時のズーム', unit: '', step: 0.5, min: 10, max: 20 },
+      { key: 'PITCH_3D', label: '3D表示時の傾き', unit: '度', step: 5, min: 0, max: 85 },
+      { key: 'RESUME_AFTER_SECONDS', label: '操作後、自動追従に戻るまで', unit: '秒', step: 1, min: 1 }
+    ]
+  },
+  {
+    title: '3D地形',
+    desc: '山や坂道の高さの誇張度合い。',
+    group: 'TERRAIN',
+    fields: [
+      { key: 'EXAGGERATION', label: '誇張率', unit: '倍', step: 0.1, min: 1, max: 3 }
+    ]
+  }
+];
+
+const form = document.getElementById('form');
+
+FIELD_GROUPS.forEach(({ title, desc, group, fields }) => {
+  const h2 = document.createElement('h2');
+  h2.textContent = title;
+  form.appendChild(h2);
+  const p = document.createElement('p');
+  p.className = 'desc';
+  p.textContent = desc;
+  form.appendChild(p);
+
+  fields.forEach(({ key, label, unit, step, min, max }) => {
+    const row = document.createElement('div');
+    row.className = 'field';
+    const value = SETTABLE_GROUPS[group][key];
+    row.innerHTML = `
+      <label for="f_${group}_${key}">${label}<span class="unit">${unit}</span></label>
+      <input type="number" id="f_${group}_${key}" data-group="${group}" data-key="${key}"
+        value="${value}" step="${step}" ${min !== undefined ? `min="${min}"` : ''} ${max !== undefined ? `max="${max}"` : ''}>
+    `;
+    form.appendChild(row);
+  });
+});
+
+// 道路種別ごとのSmartLane有効/無効
+const h2 = document.createElement('h2');
+h2.textContent = 'SmartLaneを有効にする道路種別';
+form.appendChild(h2);
+const p = document.createElement('p');
+p.className = 'desc';
+p.textContent = '実走結果の取得率が低い道路種別はOFFにすると、その道ではMapbox標準案内だけになります（Phase2パターンB対応）。';
+form.appendChild(p);
+
+ROAD_CLASSES.forEach((rc) => {
+  const row = document.createElement('div');
+  row.className = 'field';
+  const checked = SETTABLE_GROUPS.SMART_LANE_ENABLED_ROAD_CLASSES[rc];
+  row.innerHTML = `
+    <label for="f_road_${rc}">${ROAD_CLASS_LABEL[rc] ?? rc}</label>
+    <input type="checkbox" id="f_road_${rc}" data-group="SMART_LANE_ENABLED_ROAD_CLASSES" data-key="${rc}" data-bool="true" ${checked ? 'checked' : ''}>
+  `;
+  form.appendChild(row);
+});
+
+function collectValues() {
+  const overrides = {};
+  form.querySelectorAll('input').forEach((input) => {
+    const { group, key, bool } = input.dataset;
+    if (!overrides[group]) overrides[group] = {};
+    overrides[group][key] = bool ? input.checked : Number(input.value);
+  });
+  return overrides;
+}
+
+document.getElementById('btnSave').addEventListener('click', () => {
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(collectValues()));
+  const msg = document.getElementById('savedMsg');
+  msg.style.display = 'block';
+  setTimeout(() => { msg.style.display = 'none'; }, 4000);
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  if (confirm('設定を初期値に戻します。よろしいですか？')) {
+    localStorage.removeItem(SETTINGS_STORAGE_KEY);
+    location.reload();
+  }
+});
+</script>
+</body>
+</html>
