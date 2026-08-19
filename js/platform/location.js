@@ -27,3 +27,15 @@ export function watchPosition(onUpdate, onError) {
 export function clearWatch(watchId) {
   if (watchId != null) navigator.geolocation.clearWatch(watchId);
 }
+
+// 画面消灯防止。sentinelはOS側の判断（画面ロック・タブ非表示等）で自動的にreleaseされるため、
+// 呼び出し側（main.js）が 'release' イベントを見て再取得の要否を判断する。
+export async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return null;
+  try {
+    return await navigator.wakeLock.request('screen');
+  } catch (err) {
+    console.warn('WakeLock取得失敗:', err.message);
+    return null;
+  }
+}

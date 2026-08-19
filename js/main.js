@@ -2,13 +2,15 @@
  * main.js — 起動・全体の配線
  * Step 1：地図の表示
  * Step 2：現在地追従・GPS精度表示・3D地形・昼夜ライティング
+ * Step 3：画面消灯防止と音声解禁（実走テスト成立の前提条件）
  */
 import { MAPBOX_TOKEN, MAP_STYLE, MAP_DEFAULT, MAP_FOLLOW, GPS_ACCURACY } from './config.js';
 import {
   createMap, enableTerrain, pickLightPreset, applyLightPreset,
   createUserMarker, followCamera
 } from './platform/mapView.js';
-import { watchPosition, clearWatch } from './platform/location.js';
+import { watchPosition, clearWatch, requestWakeLock } from './platform/location.js';
+import { unlockSpeech, speak } from './platform/voice.js';
 
 const dbg = {
   status: document.getElementById('dbgStatus'),
@@ -147,6 +149,64 @@ map.on('error', (e) => {
 
 window.addEventListener('beforeunload', () => {
   clearWatch(watchId);
+});
+
+// ---------- ナビ開始：画面消灯防止と音声解禁 ----------
+// Step 9で目的地検索・ルート案内につなぐまでは、ここでは「実走テストに必要な
+// 画面消灯防止と音声が実機で機能するか」だけを確認する。
+const btnStart = document.getElementById('btnStart');
+const guideMain = document.getElementById('guideMain');
+let navActive = false;
+let wakeLockSentinel = null;
+
+async function startNav() {
+  // iOS Safari対策：unlockSpeech()はクリックハンドラ内でawaitより前に同期的に呼ぶ
+  unlockSpeech();
+  speak('ナビを開始します');
+
+  navActive = true;
+  btnStart.classList.add('active');
+  btnStart.textContent = 'ナビ終了';
+  guideMain.textContent = 'ナビ中（Step 3テスト）';
+
+  wakeLockSentinel = await requestWakeLock();
+  if (wakeLockSentinel) {
+    wakeLockSentinel.addEventListener('release', () => {
+      wakeLockSentinel = null;
+    });
+  }
+}
+
+function stopNav() {
+  navActive = false;
+  btnStart.classList.remove('active');
+  btnStart.textContent = 'ナビ開始';
+  guideMain.textContent = 'ナビ未開始';
+
+  if (wakeLockSentinel) {
+    wakeLockSentinel.release();
+    wakeLockSentinel = null;
+  }
+}
+
+btnStart.addEventListener('click', () => {
+  if (navActive) {
+    stopNav();
+  } else {
+    startNav();
+  }
+});
+
+// タブがバックグラウンドから復帰した際、WakeLockは自動解放されているため再取得する。
+document.addEventListener('visibilitychange', async () => {
+  if (navActive && document.visibilityState === 'visible' && !wakeLockSentinel) {
+    wakeLockSentinel = await requestWakeLock();
+    if (wakeLockSentinel) {
+      wakeLockSentinel.addEventListener('release', () => {
+        wakeLockSentinel = null;
+      });
+    }
+  }
 });
 
 // Turf.js の読み込み確認（Step 6 で使うため、ここで動作を確かめておく）
