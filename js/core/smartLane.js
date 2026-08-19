@@ -15,7 +15,7 @@
  * 8. データ不足時は、案内しないことを正解とする
  */
 import { createSmartLaneAdvice } from './models.js';
-import { buildPhrase } from './phrase.js';
+import { buildPhrase, describeManeuver } from './phrase.js';
 import { GPS_ACCURACY, LANE_CHANGE } from '../config.js';
 
 function noGuidance({ confidence, reason, targetRoad = 'current', gpsDowngraded = false }) {
@@ -84,16 +84,6 @@ function checkLaneChangeDistance({ chosenIndices, validCurrent, distanceToCurren
     return { status: 'insufficient', changesNeeded };
   }
   return { status: 'critical', changesNeeded };
-}
-
-const MODIFIER_LABEL = {
-  left: '左折', 'slight left': '斜め左折', 'sharp left': '急な左折',
-  right: '右折', 'slight right': '斜め右折', 'sharp right': '急な右折',
-  straight: '直進', uturn: 'Uターン'
-};
-
-function maneuverLabel(maneuver) {
-  return MODIFIER_LABEL[maneuver?.modifier] ?? '進行';
 }
 
 /**
@@ -189,8 +179,8 @@ export function evaluateSmartLane(input) {
   );
 
   const reason = targetRoad === 'next'
-    ? `${maneuverLabel(currentManeuver)}後、${maneuverLabel(followingManeuver)}のため${finalChosen.length === 1 ? `index ${finalChosen[0]}` : `index ${finalChosen.join(',')}`}を選択`
-    : `${maneuverLabel(currentManeuver)}のため${finalChosen.length === 1 ? `index ${finalChosen[0]}` : `index ${finalChosen.join(',')}`}を選択`;
+    ? `${describeManeuver(currentManeuver)}後、${describeManeuver(followingManeuver)}のため${finalChosen.length === 1 ? `index ${finalChosen[0]}` : `index ${finalChosen.join(',')}`}を選択`
+    : `${describeManeuver(currentManeuver)}のため${finalChosen.length === 1 ? `index ${finalChosen[0]}` : `index ${finalChosen.join(',')}`}を選択`;
 
   return createSmartLaneAdvice({
     recommendedLanes: finalChosen,

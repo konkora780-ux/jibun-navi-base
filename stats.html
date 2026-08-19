@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>じぶんNaviベース - 集計</title>
+<style>
+  body { background:#0d1117; color:#e6edf3; font-family:-apple-system,"Hiragino Sans","Noto Sans JP",sans-serif; padding:16px; }
+  h1 { font-size:18px; }
+  h2 { font-size:15px; color:#58a6ff; margin-top:24px; }
+  #controls { display:flex; gap:8px; align-items:center; margin:10px 0; flex-wrap:wrap; }
+  button { background:#21262d; color:#e6edf3; border:1px solid #30363d; border-radius:6px; padding:8px 12px; cursor:pointer; }
+  table { border-collapse:collapse; width:100%; font-size:13px; margin-top:6px; }
+  th, td { border:1px solid #30363d; padding:5px 8px; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  th { background:#161b22; }
+  .empty { color:#8b949e; font-size:13px; margin:8px 0; }
+  #entryCount { color:#8b949e; font-size:13px; }
+</style>
+</head>
+<body>
+
+<h1>じぶんNaviベース - 走行ログ集計</h1>
+<div id="controls">
+  <button id="btnRefresh">再読込</button>
+  <button id="btnExport">JSONエクスポート</button>
+  <button id="btnClear">ログを削除</button>
+  <span id="entryCount"></span>
+</div>
+
+<div id="content"></div>
+
+<script type="module">
+import { loadLog, clearLog, exportLogAsFile } from './js/log/driveLog.js';
+import { ROAD_CLASSES, TEST_ROUTES } from './js/config.js';
+
+const ROAD_CLASS_LABEL = {
+  motorway: '高速道路', trunk: '幹線道路', primary: '主要道路',
+  secondary: '一般道路(2級)', street: '一般道路・その他', unknown: '不明'
+};
+const TEST_ROUTE_LABEL = {
+  kitakami_city: '北上市内', kitakami_kamaishi: '北上〜釜石',
+  tohoku_expressway: '東北自動車道', morioka_city: '盛岡市内', other: 'ルート未選択'
+};
+
+function pct(n, d) {
+  return d > 0 ? `${((n / d) * 100).toFixed(1)}%` : '—';
+}
+
+function computeGroup(entries) {
+  const total = entries.length;
+  const withLanes = entries.filter((e) => e.laneCount != null).length;
+  const byConfidence = { high: 0, medium: 0, low: 0, unknown: 0 };
+  entries.forEach((e) => { if (byConfidence[e.confidence] !== undefined) byConfidence[e.confidence]++; });
+  return {
+    total,
+    withLanes,
+    laneRate: pct(withLanes, total),
+    high: byConfidence.high,
+    highRate: pct(byConfidence.high, total),
+    mediumRate: pct(byConfidence.medium, total),
+    lowRate: pct(byConfidence.low, total),
+    unknownRate: pct(byConfidence.unknown, total)
+  };
+}
+
+function computeMatchGroup(entries) {
+  const total = entries.length;
+  const counts = { exact: 0, partial: 0, different: 0, unavailable: 0 };
+  entries.forEach((e) => { if (counts[e.recommendationMatched] !== undefined) counts[e.recommendationMatched]++; });
+  return {
+    total,
+    exactRate: pct(counts.exact, total),
+    partialRate: pct(counts.partial, total),
+    differentRate: pct(counts.different, total),
+    unavailableRate: pct(counts.unavailable, total)
+  };
+}
+
+function table(headers, rows) {
+  if (rows.length === 0) return '<p class="empty">データがありません</p>';
+  const thead = `<tr>${headers.map((h) => `<th>${h}</th>`).join('')}</tr>`;
+  const tbody = rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join('')}</tr>`).join('');
+  return `<table><thead>${thead}</thead><tbody>${tbody}</tbody></table>`;
+}
+
+function render() {
+  const allEntries = loadLog();
+  // 「通過交差点数」等の集計は、10秒ごとの定期記録ではなく交差点通過時の記録のみを対象にする。
+  const entries = allEntries.filter((e) => e.recordReason === 'intersection');
+
+  document.getElementById('entryCount').textContent =
+    `全ログ ${allEntries.length}件（うち交差点通過記録 ${entries.length}件）`;
+
+  const g = computeGroup(entries);
+  const gpsAffected = entries.filter((e) => e.gpsDowngraded).length;
+
+  let html = '';
+
+  // (A) 全体集計
+  html += '<h2>(A) 全体集計</h2>';
+  html += table(
+    ['項目', '値'],
+    [
+      ['通過交差点数', g.total],
+      ['車線データ取得数', g.withLanes],
+      ['車線データ取得率', g.laneRate],
+      ['Confidence HIGH', `${g.high}件（${g.highRate}）`],
+      ['Confidence MEDIUM率', g.mediumRate],
+      ['Confidence LOW率', g.lowRate],
+      ['Confidence UNKNOWN率', g.unknownRate],
+      ['GPS精度による降格・停止件数', gpsAffected]
+    ]
+  );
+
+  // (B) 道路種別ごとの集計
+  html += '<h2>(B) 道路種別ごとの集計</h2>';
+  html += table(
+    ['道路種別', '通過数', '車線取得数', '取得率', 'HIGH数', 'HIGH率', 'MEDIUM率', 'LOW率', 'UNKNOWN率'],
+    ROAD_CLASSES.map((rc) => {
+      const gg = computeGroup(entries.filter((e) => e.roadClass === rc));
+      return [ROAD_CLASS_LABEL[rc] ?? rc, gg.total, gg.withLanes, gg.laneRate, gg.high, gg.highRate, gg.mediumRate, gg.lowRate, gg.unknownRate];
+    })
+  );
+
+  // (C) テストルートごとの集計
+  html += '<h2>(C) テストルートごとの集計</h2>';
+  html += table(
+    ['ルート', '通過数', '車線取得数', '取得率', 'HIGH数', 'HIGH率', 'MEDIUM率', 'LOW率', 'UNKNOWN率'],
+    TEST_ROUTES.map((tr) => {
+      const gg = computeGroup(entries.filter((e) => e.testRouteId === tr));
+      return [TEST_ROUTE_LABEL[tr] ?? tr, gg.total, gg.withLanes, gg.laneRate, gg.high, gg.highRate, gg.mediumRate, gg.lowRate, gg.unknownRate];
+    })
+  );
+
+  // (D) Mapbox推奨との一致状況
+  html += '<h2>(D) Mapbox推奨との一致状況</h2>';
+  const overallMatch = computeMatchGroup(entries);
+  html += table(
+    ['区分', '件数', '完全一致(exact)', '一部一致(partial)', '不一致(different)', '比較不能(unavailable)'],
+    [
+      ['全体', overallMatch.total, overallMatch.exactRate, overallMatch.partialRate, overallMatch.differentRate, overallMatch.unavailableRate],
+      ...ROAD_CLASSES.map((rc) => {
+        const mm = computeMatchGroup(entries.filter((e) => e.roadClass === rc));
+        return [ROAD_CLASS_LABEL[rc] ?? rc, mm.total, mm.exactRate, mm.partialRate, mm.differentRate, mm.unavailableRate];
+      })
+    ]
+  );
+
+  // (E) 不一致ケース一覧
+  html += '<h2>(E) 不一致ケース一覧（recommendationMatched = different）</h2>';
+  const mismatches = entries.filter((e) => e.recommendationMatched === 'different');
+  html += table(
+    ['日時', '道路名', '道路種別', 'MB推奨', 'SL推奨', 'reason'],
+    mismatches.map((e) => [
+      new Date(e.timestamp).toLocaleString('ja-JP'),
+      e.roadName ?? '（無名道路）',
+      ROAD_CLASS_LABEL[e.roadClass] ?? e.roadClass,
+      (e.mapboxRecommendedLanes ?? []).join(',') || '—',
+      (e.smartLaneRecommendedLanes ?? []).join(',') || '—',
+      e.reason ?? ''
+    ])
+  );
+
+  document.getElementById('content').innerHTML = html;
+}
+
+document.getElementById('btnRefresh').addEventListener('click', render);
+document.getElementById('btnExport').addEventListener('click', exportLogAsFile);
+document.getElementById('btnClear').addEventListener('click', () => {
+  if (confirm('走行ログを全て削除します。よろしいですか？')) {
+    clearLog();
+    render();
+  }
+});
+
+render();
+</script>
+</body>
+</html>

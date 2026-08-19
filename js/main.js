@@ -2,15 +2,31 @@
  * main.js — 起動・全体の配線
  * Step 1：地図の表示
  * Step 2：現在地追従・GPS精度表示・3D地形・昼夜ライティング
- * Step 3：画面消灯防止と音声解禁（実走テスト成立の前提条件）
+ * Step 3：画面消灯防止と音声解禁
+ * Step 4〜7：Core層のデータ型・Directions API正規化・routeTracker・SmartLane
+ * Step 8：デバッグ表示・車線矢印描画
+ * Step 9：目的地検索・自動再ルート
+ * Step 10：走行ログ
  */
-import { MAPBOX_TOKEN, MAP_STYLE, MAP_DEFAULT, MAP_FOLLOW, GPS_ACCURACY } from './config.js';
+import {
+  MAPBOX_TOKEN, MAP_STYLE, MAP_DEFAULT, MAP_FOLLOW, GPS_ACCURACY, LOG
+} from './config.js';
 import {
   createMap, enableTerrain, pickLightPreset, applyLightPreset,
-  createUserMarker, followCamera
+  createUserMarker, followCamera, drawRoute, clearRoute
 } from './platform/mapView.js';
 import { watchPosition, clearWatch, requestWakeLock } from './platform/location.js';
 import { unlockSpeech, speak } from './platform/voice.js';
+import { fetchRoute } from './platform/directions.js';
+import { searchDestination } from './platform/geocoding.js';
+import { createRouteTracker } from './nav/routeTracker.js';
+import { createRerouter } from './nav/rerouter.js';
+import { createSmartLaneInput } from './core/models.js';
+import { evaluateSmartLane } from './core/smartLane.js';
+import { compareRecommendation } from './core/compare.js';
+import { describeManeuver } from './core/phrase.js';
+import { renderDebugPanel } from './ui/debugPanel.js';
+import { appendLogEntry, exportLogAsFile, clearLog } from './log/driveLog.js';
 
 const dbg = {
   status: document.getElementById('dbgStatus'),
@@ -104,18 +120,180 @@ function accuracyClass(accuracy) {
   return 'acc-bad';
 }
 
-function updateDebugPanel(pos) {
+function updateGpsDebug(pos) {
   dbg.gps.textContent = `${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}`;
   dbg.accuracy.textContent = pos.accuracy != null ? `${pos.accuracy.toFixed(1)} m` : '取得不可';
   dbg.accuracy.className = accuracyClass(pos.accuracy);
   dbg.speed.textContent = pos.speed != null ? `${Math.round(pos.speed * 3.6)} km/h` : '—';
 }
 
+// ---------- 目的地検索（Step9） ----------
+const destInput = document.getElementById('destInput');
+const btnSearch = document.getElementById('btnSearch');
+const testRouteSelect = document.getElementById('testRouteId');
+let selectedDestination = null;
+
+btnSearch.addEventListener('click', async () => {
+  const query = destInput.value.trim();
+  if (!query) return;
+
+  btnSearch.disabled = true;
+  try {
+    const results = await searchDestination({
+      query,
+      token: MAPBOX_TOKEN,
+      proximity: lastPosition ? { lat: lastPosition.lat, lon: lastPosition.lon } : null
+    });
+    if (results.length === 0) {
+      setStatus('検索結果が見つかりません', true);
+      return;
+    }
+    // Phase 1は測定装置に徹するため、候補一覧UIは作らず先頭候補を採用する。
+    selectedDestination = results[0];
+    destInput.value = `${selectedDestination.name}（${selectedDestination.address}）`;
+    setStatus(`目的地を設定: ${selectedDestination.name}`);
+  } catch (err) {
+    setStatus(`検索エラー: ${err.message}`, true);
+  } finally {
+    btnSearch.disabled = false;
+  }
+});
+
+// ---------- ナビ本体（Step6〜10：ルート取得・追跡・SmartLane評価・ログ） ----------
+let currentRoute = null;
+let tracker = null;
+const rerouter = createRerouter();
+let lastLogAt = 0;
+let lastLoggedStepIndex = -1;
+let rerouting = false;
+
+function buildStepInputs(route, stepIndex, pos) {
+  const step = route.steps[stepIndex];
+  const nextStep = route.steps[stepIndex + 1] ?? null;
+  return createSmartLaneInput({
+    currentRoad: step.road,
+    currentManeuver: step.endManeuver,
+    distanceToCurrent: 0, // 下でtrackResultの値に差し替える
+    nextRoad: nextStep?.road ?? null,
+    followingManeuver: nextStep?.endManeuver ?? null,
+    distanceToFollowing: nextStep?.distance ?? null,
+    currentSpeed: pos.speed ?? 0,
+    gpsAccuracy: pos.accuracy
+  });
+}
+
+function activeIndicesOf(road) {
+  if (!road?.lanes) return [];
+  return road.lanes.map((lane, i) => (lane.isActive ? i : null)).filter((i) => i !== null);
+}
+
+function collectMissingFields({ currentRoad, nextRoad, followingManeuver, gpsAccuracy }) {
+  const missing = [];
+  if (!currentRoad.lanes) missing.push('現在車線');
+  if (currentRoad.roadClass === 'unknown') missing.push('道路種別');
+  if (!nextRoad || !nextRoad.lanes) missing.push('次道路車線');
+  if (!followingManeuver) missing.push('次々の曲がり方');
+  if (gpsAccuracy == null) missing.push('GPS精度');
+  return missing;
+}
+
+function processNavUpdate(pos) {
+  if (!tracker || !currentRoute) return;
+
+  const trackResult = tracker.update(pos);
+  const stepIndex = trackResult.stepIndex;
+  const step = currentRoute.steps[stepIndex];
+  const nextStep = currentRoute.steps[stepIndex + 1] ?? null;
+
+  const input = buildStepInputs(currentRoute, stepIndex, pos);
+  input.distanceToCurrent = trackResult.distanceToCurrentManeuver;
+
+  const advice = evaluateSmartLane(input);
+  const targetRoadSnapshot = advice.targetRoad === 'next' ? input.nextRoad : input.currentRoad;
+  const mapboxRecommendedLanes = activeIndicesOf(targetRoadSnapshot);
+  const recommendationMatched = compareRecommendation(mapboxRecommendedLanes, advice.recommendedLanes);
+  const missingFields = collectMissingFields(input);
+
+  const snap = {
+    roadClass: input.currentRoad.roadClass,
+    roadName: input.currentRoad.name,
+    laneCount: input.currentRoad.laneCount,
+    lanesRaw: input.currentRoad.lanes,
+    mapboxRecommendedLanes,
+    smartLaneRecommendedLanes: advice.recommendedLanes,
+    recommendationMatched,
+    nextManeuver: describeManeuver(input.currentManeuver),
+    distanceToNext: trackResult.distanceToCurrentManeuver,
+    followingManeuver: describeManeuver(input.followingManeuver),
+    distanceToFollowing: input.distanceToFollowing,
+    nextRoadName: input.nextRoad?.name ?? null,
+    nextRoadLaneCount: input.nextRoad?.laneCount ?? null,
+    nextRoadLanesRaw: input.nextRoad?.lanes ?? null,
+    confidence: advice.confidence,
+    reason: advice.reason,
+    gpsDowngraded: advice.gpsDowngraded,
+    missingFields
+  };
+  renderDebugPanel(snap);
+
+  // ---------- 走行ログ（交差点通過時 ＋ LOG.INTERVAL_SECONDSごと） ----------
+  const now = Date.now();
+  const stepChanged = stepIndex !== lastLoggedStepIndex;
+  const intervalElapsed = now - lastLogAt >= LOG.INTERVAL_SECONDS * 1000;
+  if (stepChanged || intervalElapsed) {
+    appendLogEntry({
+      timestamp: new Date(now).toISOString(),
+      recordReason: stepChanged ? 'intersection' : 'interval',
+      testRouteId: testRouteSelect.value,
+      lat: pos.lat,
+      lon: pos.lon,
+      gpsAccuracy: pos.accuracy,
+      speed: pos.speed,
+      roadName: snap.roadName,
+      roadClass: snap.roadClass,
+      laneCount: snap.laneCount,
+      lanesRaw: snap.lanesRaw,
+      mapboxRecommendedLanes: snap.mapboxRecommendedLanes,
+      smartLaneRecommendedLanes: snap.smartLaneRecommendedLanes,
+      recommendationMatched: snap.recommendationMatched,
+      nextManeuver: snap.nextManeuver,
+      distanceToNext: snap.distanceToNext,
+      followingManeuver: snap.followingManeuver,
+      distanceToFollowing: snap.distanceToFollowing,
+      nextRoadName: snap.nextRoadName,
+      nextRoadLaneCount: snap.nextRoadLaneCount,
+      nextRoadLanesRaw: snap.nextRoadLanesRaw,
+      confidence: snap.confidence,
+      reason: snap.reason,
+      gpsDowngraded: snap.gpsDowngraded,
+      missingFields: snap.missingFields
+    });
+    lastLogAt = now;
+    lastLoggedStepIndex = stepIndex;
+  }
+
+  // ---------- 自動再ルート（逸脱検知、最短10秒間隔） ----------
+  if (!rerouting && rerouter.shouldReroute(trackResult.isOffRoute, now) && selectedDestination) {
+    rerouting = true;
+    setStatus('ルートから外れました。再検索中…');
+    fetchRoute({ origin: { lat: pos.lat, lon: pos.lon }, destination: selectedDestination, token: MAPBOX_TOKEN })
+      .then((route) => {
+        currentRoute = route;
+        tracker = createRouteTracker(route);
+        lastLoggedStepIndex = -1;
+        drawRoute(map, route.geometry);
+        setStatus('再ルートしました');
+      })
+      .catch((err) => setStatus(`再ルートエラー: ${err.message}`, true))
+      .finally(() => { rerouting = false; });
+  }
+}
+
 let firstFixReceived = false;
 
 function onPositionUpdate(pos) {
   lastPosition = pos;
-  updateDebugPanel(pos);
+  updateGpsDebug(pos);
 
   if (!userMarker) userMarker = createUserMarker(map);
   userMarker.update([pos.lon, pos.lat], pos.heading);
@@ -128,6 +306,8 @@ function onPositionUpdate(pos) {
     firstFixReceived = true;
     setStatus('地図+GPS OK（Step 2完了）');
   }
+
+  processNavUpdate(pos);
 }
 
 function onPositionError(err) {
@@ -151,24 +331,13 @@ window.addEventListener('beforeunload', () => {
   clearWatch(watchId);
 });
 
-// ---------- ナビ開始：画面消灯防止と音声解禁 ----------
-// Step 9で目的地検索・ルート案内につなぐまでは、ここでは「実走テストに必要な
-// 画面消灯防止と音声が実機で機能するか」だけを確認する。
+// ---------- ナビ開始／終了：画面消灯防止・音声解禁・ルート取得 ----------
 const btnStart = document.getElementById('btnStart');
 const guideMain = document.getElementById('guideMain');
 let navActive = false;
 let wakeLockSentinel = null;
 
-async function startNav() {
-  // iOS Safari対策：unlockSpeech()はクリックハンドラ内でawaitより前に同期的に呼ぶ
-  unlockSpeech();
-  speak('ナビを開始します');
-
-  navActive = true;
-  btnStart.classList.add('active');
-  btnStart.textContent = 'ナビ終了';
-  guideMain.textContent = 'ナビ中（Step 3テスト）';
-
+async function acquireWakeLock() {
   wakeLockSentinel = await requestWakeLock();
   if (wakeLockSentinel) {
     wakeLockSentinel.addEventListener('release', () => {
@@ -177,11 +346,51 @@ async function startNav() {
   }
 }
 
+async function startNav() {
+  // iOS Safari対策：unlockSpeech()はクリックハンドラ内でawaitより前に同期的に呼ぶ
+  unlockSpeech();
+
+  navActive = true;
+  btnStart.classList.add('active');
+  btnStart.textContent = 'ナビ終了';
+
+  if (selectedDestination && lastPosition) {
+    guideMain.textContent = 'ルート取得中…';
+    try {
+      currentRoute = await fetchRoute({
+        origin: { lat: lastPosition.lat, lon: lastPosition.lon },
+        destination: selectedDestination,
+        token: MAPBOX_TOKEN
+      });
+      tracker = createRouteTracker(currentRoute);
+      lastLoggedStepIndex = -1;
+      drawRoute(map, currentRoute.geometry);
+      guideMain.textContent = 'ナビ中';
+      speak('ナビを開始します');
+    } catch (err) {
+      guideMain.textContent = 'ルート取得エラー';
+      setStatus(`ルート取得エラー: ${err.message}`, true);
+      speak('ルートを取得できませんでした');
+    }
+  } else {
+    // 目的地未設定でも、画面消灯防止・音声解禁の実機確認はできるようにする（Step3の動作確認を壊さない）。
+    guideMain.textContent = 'ナビ中（目的地未設定）';
+    speak('ナビを開始します');
+  }
+
+  await acquireWakeLock();
+}
+
 function stopNav() {
   navActive = false;
   btnStart.classList.remove('active');
   btnStart.textContent = 'ナビ開始';
   guideMain.textContent = 'ナビ未開始';
+
+  currentRoute = null;
+  tracker = null;
+  lastLoggedStepIndex = -1;
+  clearRoute(map);
 
   if (wakeLockSentinel) {
     wakeLockSentinel.release();
@@ -198,18 +407,19 @@ btnStart.addEventListener('click', () => {
 });
 
 // タブがバックグラウンドから復帰した際、WakeLockは自動解放されているため再取得する。
-document.addEventListener('visibilitychange', async () => {
+document.addEventListener('visibilitychange', () => {
   if (navActive && document.visibilityState === 'visible' && !wakeLockSentinel) {
-    wakeLockSentinel = await requestWakeLock();
-    if (wakeLockSentinel) {
-      wakeLockSentinel.addEventListener('release', () => {
-        wakeLockSentinel = null;
-      });
-    }
+    acquireWakeLock();
   }
 });
 
-// Turf.js の読み込み確認（Step 6 で使うため、ここで動作を確かめておく）
+// ---------- 走行ログの操作 ----------
+document.getElementById('btnLogExport').addEventListener('click', exportLogAsFile);
+document.getElementById('btnLogClear').addEventListener('click', () => {
+  if (confirm('走行ログを全て削除します。よろしいですか？')) clearLog();
+});
+
+// Turf.js の読み込み確認
 if (typeof turf === 'undefined') {
   console.warn('Turf.js が読み込まれていません');
 } else {

@@ -68,6 +68,12 @@ html, body {
 }
 #app.hide-debug #debugPanel { display: none; }
 
+#logControls { margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+#logControls button, #logControls a {
+  background: #21262d; color: #e6edf3; border: 1px solid #30363d; border-radius: 6px;
+  padding: 6px 8px; font-size: 12px; text-align: center; text-decoration: none; cursor: pointer;
+}
+
 #debugPanel h2 {
   font-size: 12px;
   color: #8b949e;
@@ -88,6 +94,22 @@ html, body {
 .acc-bad     { color: #f85149; }
 .acc-unknown { color: #8b949e; }
 .warn        { color: #f85149; }
+
+/* ---------- 車線表示 ---------- */
+.lane {
+  display: inline-block;
+  min-width: 20px;
+  padding: 2px 4px;
+  margin: 1px;
+  border-radius: 4px;
+  background: #21262d;
+  color: #e6edf3;
+  text-align: center;
+}
+.lane-invalid { color: #6e7681; background: #161b22; text-decoration: line-through; }
+.lane-active { border: 1px solid #58a6ff; }
+.lane-recommended { background: #1f6feb; color: #fff; font-weight: 700; }
+.lane-missing { color: #f85149; }
 
 /* ---------- 下部の案内バー ---------- */
 #guidebar {

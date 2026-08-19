@@ -27,8 +27,8 @@
 
   <!-- 上部バー -->
   <header id="topbar">
-    <input id="destInput" type="text" placeholder="目的地を検索" disabled>
-    <button id="btnSearch" disabled>検索</button>
+    <input id="destInput" type="text" placeholder="目的地を検索">
+    <button id="btnSearch">検索</button>
     <button id="btnStart" class="toggle">ナビ開始</button>
     <button id="btnRecenter" class="toggle" title="現在地に戻る">現在地</button>
     <button id="btn3d" class="toggle">3D</button>
@@ -66,6 +66,11 @@
         <dt>信頼度</dt>      <dd id="dbgConfidence">—</dd>
         <dt>取得不可</dt>    <dd id="dbgMissing" class="warn">—</dd>
       </dl>
+      <div id="logControls">
+        <button id="btnLogExport">ログ書き出し</button>
+        <button id="btnLogClear">ログ削除</button>
+        <a id="btnStats" href="stats.html" target="_blank" rel="noopener">集計を開く</a>
+      </div>
     </aside>
   </main>
 

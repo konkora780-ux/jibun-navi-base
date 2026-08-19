@@ -61,6 +61,28 @@ export function createUserMarker(map) {
   };
 }
 
+// ルート線の描画（Step9で取得したルートを地図上に表示する）。
+export function drawRoute(map, geometry) {
+  const source = map.getSource('route-line');
+  if (source) {
+    source.setData({ type: 'Feature', geometry });
+    return;
+  }
+  map.addSource('route-line', { type: 'geojson', data: { type: 'Feature', geometry } });
+  map.addLayer({
+    id: 'route-line',
+    type: 'line',
+    source: 'route-line',
+    layout: { 'line-join': 'round', 'line-cap': 'round' },
+    paint: { 'line-color': '#58a6ff', 'line-width': 5, 'line-opacity': 0.8 }
+  });
+}
+
+export function clearRoute(map) {
+  if (map.getLayer('route-line')) map.removeLayer('route-line');
+  if (map.getSource('route-line')) map.removeSource('route-line');
+}
+
 // 追従カメラ。is3d に応じてpitchを切り替える。
 export function followCamera(map, lngLat, heading, { is3d }) {
   map.easeTo({

@@ -28,6 +28,18 @@ function describeLaneGroup(indices, laneCount) {
   return '中央車線がおすすめです';
 }
 
+const MODIFIER_LABEL = {
+  left: '左折', 'slight left': '斜め左折', 'sharp left': '急な左折',
+  right: '右折', 'slight right': '斜め右折', 'sharp right': '急な右折',
+  straight: '直進', uturn: 'Uターン'
+};
+
+/** maneuverオブジェクトを短い日本語ラベルにする（デバッグ表示・ログ用）。 */
+export function describeManeuver(maneuver) {
+  if (!maneuver) return null;
+  return MODIFIER_LABEL[maneuver.modifier] ?? maneuver.type ?? '進行';
+}
+
 const MODIFIER_PREFIX = {
   left: '左折後は',
   'slight left': '左折後は',
